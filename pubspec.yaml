@@ -1,0 +1,31 @@
+name: signid
+description: "Sign-ID — 수어 제스처 기반 비접촉 인증 안드로이드 앱 (프론트엔드)."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+# 버전은 2026-08-24 기준 pub.dev 최신 안정 버전을 확인해 기입했다. (SPEC 0장)
+#   camera 0.12.0+2 / hand_landmarker 3.0.1 / flutter_riverpod 3.4.2
+#   fl_chart 1.2.0 / intl 0.20.3 / permission_handler 13.0.1 / http 1.6.0
+dependencies:
+  flutter:
+    sdk: flutter
+
+  camera: ^0.12.0+2
+  hand_landmarker: ^3.0.1      # Android 전용, MediaPipe JNI 브릿지 (tasks-vision 0.10.29)
+  flutter_riverpod: ^3.4.2     # 상태 관리
+  fl_chart: ^1.2.0             # 관리자 화면 꺾은선 차트
+  intl: ^0.20.3                # 날짜/시간 포맷
+  permission_handler: ^13.0.1  # 카메라 권한
+  http: ^1.6.0                 # 목 단계에선 미사용. http_api_client 스텁 대비.
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
