@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/widgets.dart';
+
 import '../models/landmark.dart';
 import 'landmark_source.dart';
 
@@ -31,7 +33,11 @@ class FakeLandmarkSource implements LandmarkSource {
 
   /// Fake 소스는 보여줄 카메라 프리뷰가 없다. 원 안에는 오버레이만 그린다.
   @override
-  bool get hasPreview => false;
+  Widget? buildPreview() => null;
+
+  /// 가짜 좌표는 처음부터 세로 화면 기준으로 만들었으므로 회전·미러가 필요 없다.
+  @override
+  LandmarkTransform get transform => const LandmarkTransform();
 
   @override
   Future<void> start() async {

@@ -47,6 +47,16 @@ const int kEnrollRepeatCount = 5;
 /// 등록 회차 사이의 대기 시간.
 const Duration kEnrollInterval = Duration(milliseconds: 1500);
 
+// ─── 랜드마크 소스 ────────────────────────────────────────────────
+
+/// 전송 JSON의 `handedness`에 넣을 값.
+///
+/// hand_landmarker 3.0.1의 `Hand`는 landmarks만 주고 좌/우 정보를 주지 않는다.
+/// 좌표만으로 좌우를 추정하면 손바닥이 뒤집힐 때 틀리므로 추정하지 않고,
+/// 합의된 고정값을 보낸다. 서버가 좌우를 구분해야 한다면 플러그인 확장이나
+/// 서버 측 추정이 필요하다. (SPEC 0장 — 패키지 실제 API를 따른다)
+const String kAssumedHandedness = 'Right';
+
 // ─── 레이아웃 ────────────────────────────────────────────────────
 
 /// 인증 화면 가이드 원의 지름 = 화면 폭 × 이 비율. (SPEC 8.2)

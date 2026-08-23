@@ -1,4 +1,29 @@
+import 'package:flutter/widgets.dart';
+
 import '../models/landmark.dart';
+
+/// 오버레이 좌표 변환에 필요한 파라미터 묶음.
+///
+/// 소스마다 회전·미러·화면비가 다르므로 소스가 직접 알려준다. 화면은 이 값을
+/// 그대로 [HandOverlayPainter]에 넘기기만 하고 스스로 계산하지 않는다.
+/// (SPEC 8.2 — 변환 파라미터를 생성자로 받는다)
+@immutable
+class LandmarkTransform {
+  /// 좌표를 시계방향으로 돌려야 하는 각도(0/90/180/270).
+  final int rotationDegrees;
+
+  /// 표시할 때 좌우 반전할지. **전송 좌표에는 적용되지 않는다.**
+  final bool mirror;
+
+  /// 원본 이미지의 가로/세로 비. null이면 캔버스를 꽉 채우도록 늘린다.
+  final double? sourceAspectRatio;
+
+  const LandmarkTransform({
+    this.rotationDegrees = 0,
+    this.mirror = false,
+    this.sourceAspectRatio,
+  });
+}
 
 /// 랜드마크 공급자 추상 인터페이스. (SPEC 원칙 B)
 ///
@@ -22,11 +47,15 @@ abstract class LandmarkSource {
   /// 자원을 해제한다. 이후 이 인스턴스는 재사용할 수 없다.
   void dispose();
 
-  /// 프리뷰 위젯을 화면에 띄울 필요가 있는지.
+  /// 원 안에 깔 프리뷰 위젯. 프리뷰가 없는 소스(Fake 등)는 null을 준다.
   ///
-  /// 실기기 소스는 true(카메라 프리뷰가 있어야 함), Fake 소스는 false.
-  /// 인증 화면이 원 안에 무엇을 그릴지 결정하는 데 쓴다.
-  bool get hasPreview;
+  /// 서비스 계층이 위젯을 돌려주는 것이 이상적이진 않지만, 대안은 화면이
+  /// `source is OnDeviceLandmarkSource`로 구현체를 캐스팅하는 것이라
+  /// 원칙 B(구현체를 모르게 한다)를 더 크게 어긴다. 둘 중 덜 나쁜 쪽을 골랐다.
+  Widget? buildPreview();
+
+  /// 오버레이 좌표 변환 파라미터.
+  LandmarkTransform get transform;
 
   /// 프레임 타임스탬프의 기준 시각을 0으로 리셋한다.
   ///
