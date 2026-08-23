@@ -47,8 +47,7 @@ class OnDeviceLandmarkSource implements LandmarkSource {
       final status = await Permission.camera.request();
       if (!status.isGranted) {
         _controller.addError(
-          CameraException(
-            'cameraAccessDenied',
+          const LandmarkSourceException(
             '카메라 권한이 없습니다. 설정 > 앱 > Sign-ID에서 카메라 접근을 허용해주세요.',
           ),
         );
@@ -58,7 +57,9 @@ class OnDeviceLandmarkSource implements LandmarkSource {
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
         _controller.addError(
-          CameraException('noCameraAvailable', '사용할 수 있는 카메라가 없습니다.'),
+          const LandmarkSourceException(
+            '사용할 수 있는 카메라가 없습니다. 카메라가 있는 기기에서 실행해주세요.',
+          ),
         );
         return;
       }
@@ -93,6 +94,14 @@ class OnDeviceLandmarkSource implements LandmarkSource {
         ..start();
       await camera.startImageStream(_onCameraImage);
       _running = true;
+    } on CameraException catch (e) {
+      // 다른 앱이 카메라를 점유했거나 초기화에 실패한 경우.
+      _controller.addError(
+        LandmarkSourceException(
+          '카메라를 열 수 없습니다. (${e.code}) '
+          '카메라를 쓰는 다른 앱을 종료하고 다시 시도해주세요.',
+        ),
+      );
     } finally {
       _starting = false;
     }

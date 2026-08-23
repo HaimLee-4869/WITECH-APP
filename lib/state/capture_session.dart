@@ -86,7 +86,7 @@ class CaptureSession {
   /// 소스를 켜고 프레임 구독을 시작한다. 화면 진입 시 한 번 호출한다.
   Future<void> attach() async {
     if (_sub != null) return;
-    _sub = source.frames.listen(_onFrame);
+    _sub = source.frames.listen(_onFrame, onError: _onSourceError);
     _sinceLastFrame
       ..reset()
       ..start();
@@ -147,6 +147,26 @@ class CaptureSession {
       return;
     }
     onChanged();
+  }
+
+  /// 소스를 켜지 못했을 때(권한 거부, 카메라 점유 등).
+  ///
+  /// 이걸 흘려보내면 화면이 "손을 찾는 중" 상태로 영원히 멈춰 있고 사용자는
+  /// 이유를 알 수 없다. 캡처를 접고 무엇을 해야 하는지 문구로 띄운다.
+  void _onSourceError(Object error) {
+    _cancelFlowTimers();
+    _buffer.clear();
+    _consecutiveDetected = 0;
+    phase = CapturePhase.idle;
+    progress = 0.0;
+    countdown = kCountdownSeconds;
+    latestFrame = null;
+    onChanged();
+    onAborted(
+      error is LandmarkSourceException
+          ? error.message
+          : '카메라를 시작하지 못했습니다. 앱을 다시 실행해주세요.',
+    );
   }
 
   /// 녹화 시작 직전에 만들어진 "묵은" 프레임인지 판별한다.

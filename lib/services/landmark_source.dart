@@ -25,6 +25,20 @@ class LandmarkTransform {
   });
 }
 
+/// 소스를 켤 수 없을 때 [LandmarkSource.frames]로 흘려보내는 오류.
+///
+/// 권한 거부나 카메라 부재는 사용자가 조치할 수 있는 문제이므로, 조용히 멈추지
+/// 말고 화면에 무엇을 해야 하는지 띄워야 한다. [message]는 그대로 사용자에게
+/// 보여줄 수 있는 문장이다. (SPEC 5장 카피 원칙)
+class LandmarkSourceException implements Exception {
+  final String message;
+
+  const LandmarkSourceException(this.message);
+
+  @override
+  String toString() => 'LandmarkSourceException: $message';
+}
+
 /// 랜드마크 공급자 추상 인터페이스. (SPEC 원칙 B)
 ///
 /// 나중에 "서버에서 영상을 받아 추출"하는 방식으로 바뀔 수 있으므로 UI와
