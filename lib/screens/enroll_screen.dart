@@ -32,8 +32,7 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final diameter = size.width * kCaptureRingDiameterRatio;
+    final diameter = captureRingDiameter(MediaQuery.sizeOf(context));
     final phase = ref.watch(enrollProvider.select((s) => s.phase));
 
     return Scaffold(

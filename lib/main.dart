@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme.dart';
-import 'screens/auth_screen.dart';
+import 'screens/home_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,8 +27,9 @@ class SignIdApp extends StatelessWidget {
       title: 'Sign-ID',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
-      // TODO(routing): 홈 화면을 만들면 진입점을 홈으로 바꾼다. (작업 순서 8단계)
-      home: const AuthScreen(),
+      // 라우팅은 Navigator.push 정도로 충분하다. 화면이 5개뿐이고 딥링크나
+      // 중첩 라우트가 없어서 라우터 패키지를 들일 이유가 없다. (SPEC 13장)
+      home: const HomeScreen(),
     );
   }
 }

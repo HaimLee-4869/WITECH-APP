@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/config.dart';
 import '../core/theme.dart';
 import '../state/auth_flow_controller.dart';
 import '../state/providers.dart';
@@ -40,8 +39,7 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
       if (phase == AuthPhase.done) _goToResult();
     });
 
-    final size = MediaQuery.sizeOf(context);
-    final diameter = size.width * kCaptureRingDiameterRatio;
+    final diameter = captureRingDiameter(MediaQuery.sizeOf(context));
 
     return Scaffold(
       backgroundColor: AppColors.bg,

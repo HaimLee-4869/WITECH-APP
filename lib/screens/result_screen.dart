@@ -136,20 +136,21 @@ class _ScoreChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    // 폭이 좁은 기기에서는 칩 3개가 한 줄에 들어가지 않으므로 Wrap을 쓴다.
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 8,
+      runSpacing: 8,
       children: [
         StatusChip(
           label: '유사도 ${response.score.toStringAsFixed(3)}',
           color: response.passed ? AppColors.success : AppColors.danger,
           icon: Icons.analytics_outlined,
         ),
-        const SizedBox(width: 8),
         StatusChip(
           label: '기준 ${response.threshold.toStringAsFixed(2)}',
           color: AppColors.textSecondary,
         ),
-        const SizedBox(width: 8),
         StatusChip(
           label: '${response.latencyMs}ms',
           color: AppColors.textSecondary,

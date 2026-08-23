@@ -2,7 +2,19 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../core/config.dart';
 import '../core/theme.dart';
+
+/// 화면 크기에 맞는 가이드 원 지름.
+///
+/// 기본은 화면 폭의 [kCaptureRingDiameterRatio]배지만(SPEC 8.2), 화면이 낮으면
+/// 그 값이 세로 공간을 넘겨 문구와 버튼이 잘려 나간다. 세로로도 상한을 둔다.
+/// 일반적인 세로 폰에서는 폭 기준이 그대로 이긴다.
+double captureRingDiameter(Size screen) {
+  final byWidth = screen.width * kCaptureRingDiameterRatio;
+  final byHeight = screen.height * 0.45;
+  return byWidth < byHeight ? byWidth : byHeight;
+}
 
 /// 인증/등록 화면의 원형 캡처 영역. (SPEC 8.2)
 ///
