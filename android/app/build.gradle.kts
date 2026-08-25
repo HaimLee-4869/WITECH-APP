@@ -6,7 +6,9 @@ plugins {
 
 android {
     namespace = "com.jbnu.signid.signid"
-    compileSdk = flutter.compileSdkVersion
+    // permission_handler_android가 SDK 37로 컴파일되기를 요구한다.
+    // (Flutter 기본값 36으로 두면 assemble 단계에서 실패)
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

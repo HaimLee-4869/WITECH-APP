@@ -26,33 +26,63 @@
 | Flutter SDK | 3.44 이상 (개발 시 3.44.8 / Dart 3.12.2) |
 | JDK | 17 이상 |
 | Android minSdk | 24 |
-| compileSdk | 36 |
+| compileSdk | **37** (`permission_handler_android`가 요구. 36으로 두면 빌드 실패) |
 
 **Android 전용이다.** `flutter create` 시 `--platforms android`만 지정했고
 `ios/`, `web/`, `windows/` 등의 폴더는 만들지 않는다. `hand_landmarker`
 플러그인이 JNI 기반 Android 전용이라 다른 플랫폼에서는 빌드되지 않는다.
 
-### 빌드 · 실행
+### 내 폰에 설치하기
+
+1. 폰에서 **개발자 옵션 → USB 디버깅**을 켜고 USB로 연결한다.
+2. 연결을 확인한다. 폰에 "USB 디버깅을 허용하시겠습니까?" 팝업이 뜨면 허용한다.
+
+```bash
+flutter devices          # 폰이 목록에 보여야 한다
+```
+
+3. 빌드하고 설치한다.
 
 ```bash
 flutter pub get
-flutter run                 # 실기기 또는 에뮬레이터
-flutter build apk --debug   # APK 빌드
+flutter build apk --release
+flutter install --release
 ```
+
+기기가 여러 대면 `-d <device-id>`로 지정한다 (`flutter devices`의 두 번째 열).
+
+```bash
+flutter install --release -d RFCWB1EH7FN
+```
+
+앱을 처음 실행하면 카메라 권한을 묻는다. 허용해야 인증 화면이 동작한다.
+거부하면 원 아래에 무엇을 해야 하는지 안내 문구가 뜬다.
+
+개발 중에는 핫 리로드가 되는 `flutter run`이 더 편하다.
+
+```bash
+flutter run --release    # 또는 그냥 flutter run (디버그)
+```
+
+첫 릴리스 빌드는 MediaPipe 네이티브 라이브러리 때문에 몇 분 걸리고, APK는
+약 82MB다. 두 번째부터는 1~2분이면 끝난다.
 
 ### 검증
 
 ```bash
 flutter analyze   # 경고 0개여야 한다
-flutter test      # 상태 머신 / 오버레이 / 화면 전환 테스트
+flutter test      # 상태 머신 / 오버레이 / 화면 전환 테스트 22개
 ```
+
+테스트는 `kUseFakeLandmarks` 값과 무관하게 항상 `FakeLandmarkSource`를 주입한다
+(`test/test_helpers.dart`). 플래그를 바꿨다고 테스트가 깨지지 않는다.
 
 ### 에뮬레이터에서 확인하기
 
-에뮬레이터에는 실제 손이 없으므로 `lib/core/config.dart`의
-`kUseFakeLandmarks = true`(기본값)로 두면 가짜 랜드마크가 흐르면서
-인증 흐름 전체가 끝까지 동작한다. 카메라 없이도 상태 머신, 오버레이 렌더링,
-카운트다운, 진행률 아크, 결과 화면을 전부 확인할 수 있다.
+에뮬레이터에는 실제 손이 없다. `lib/core/config.dart`의
+`kUseFakeLandmarks = true`로 바꾸면 가짜 랜드마크가 흐르면서 인증 흐름 전체가
+끝까지 동작한다. 카메라 없이도 상태 머신, 오버레이 렌더링, 카운트다운,
+진행률 아크, 결과 화면을 전부 확인할 수 있다.
 
 ---
 
@@ -63,7 +93,7 @@ flutter test      # 상태 머신 / 오버레이 / 화면 전환 테스트
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
 | `kUseMockApi` | `true` | `true`면 `MockApiClient`(지연·랜덤 점수·5% 타임아웃), `false`면 `HttpApiClient`(아직 스텁) |
-| `kUseFakeLandmarks` | `true` | `true`면 `FakeLandmarkSource`(사인파 가짜 손), `false`면 `OnDeviceLandmarkSource`(실제 카메라 + MediaPipe) |
+| `kUseFakeLandmarks` | `false` | `false`면 `OnDeviceLandmarkSource`(실제 카메라 + MediaPipe), `true`면 `FakeLandmarkSource`(사인파 가짜 손). 에뮬레이터에서 돌릴 때만 `true`로 바꾼다 |
 | `kEnrollRepeatCount` | `5` | 등록 시 같은 제스처를 반복 수집하는 횟수. AI팀이 정하면 바뀔 값 |
 | `kRecordDuration` | `2000ms` | 한 번의 캡처에서 프레임을 모으는 시간 |
 | `kNominalFps` | `30` | 카메라 명목 fps. 서버로 보내는 `nominalFps` 값 |
@@ -244,7 +274,44 @@ done          결과 화면으로 전환
 
 서버가 정확한 좌우/신뢰도를 필요로 한다면 플러그인 확장이나 서버 측 추정이 필요하다.
 
-또한 `OnDeviceLandmarkSource`는 **실기기에서 검증되지 않았다.** 개발 환경에
-안드로이드 기기가 없어 `flutter analyze`와 Fake 소스 기반 테스트로만 확인했다.
-실기기에서 오버레이가 프리뷰와 어긋난다면 `OnDeviceLandmarkSource.transform`의
-`rotationDegrees`만 조정하면 되고, 화면이나 페인터 코드는 건드릴 필요가 없다.
+## 실기기 검증 기록
+
+Galaxy A34 5G (SM-A346N, Android 14, arm64)에서 릴리스 빌드로 확인했다.
+카메라 프리뷰, MediaPipe 손 검출, 오버레이 정렬, 6단계 상태 머신,
+결과 화면 자동 복귀까지 전부 동작한다.
+
+검증 과정에서 실기기에서만 드러난 문제 세 가지를 고쳤다. 다른 기기로 옮길 때
+같은 증상이 나오면 여기부터 볼 것.
+
+**1. 오버레이 좌표 회전**
+
+플러그인이 돌려주는 좌표는 **센서 프레임 그대로**다. `processFrame()`에
+`sensorOrientation`을 넘기지만 그건 추론용이고, 결과 좌표를 세로 기준으로
+돌려주지 않는다. 그래서 표시할 때 `sensorOrientation`만큼 직접 회전시켜야 한다
+(`OnDeviceLandmarkSource.transform`의 `rotationDegrees`).
+
+이 기기는 전면 카메라 `sensorOrientation = 270`이고, 270도 회전에서 정확히
+겹쳤다. 회전을 맞추면 추가 미러링은 필요 없다(`mirror: false`).
+
+다른 기기에서 뼈대가 손을 벗어나면 실행 직후 로그부터 확인한다.
+
+```
+SignID/camera sensorOrientation=270 previewSize=... lens=CameraLensDirection.front
+```
+
+**2. 전면 프리뷰 미러링**
+
+Android의 camera 플러그인은 전면 카메라 프리뷰를 반전하지 않고 센서가 보는
+그대로 띄운다. SPEC 8.2가 요구하는 거울 모드를 만들려면 `buildPreview()`에서
+직접 좌우 반전해야 한다.
+
+**3. 프리뷰가 늦게 뜨는 문제**
+
+`buildPreview()`는 카메라 초기화가 끝나기 전에는 null을 돌려준다. 화면이 그
+뒤에 다시 그려지지 않으면 원 안이 계속 비어 있다. 각 화면의 `initState`에서
+`attach()`를 await한 뒤 한 번 `setState`를 호출해 해결했다.
+
+**주의:** 위 좌표 변환은 이 기기 한 대에서만 검증했다. `sensorOrientation`이
+다른 기기(후면 카메라나 일부 태블릿)에서는 다시 확인이 필요하다. 조정할 곳은
+`OnDeviceLandmarkSource.transform` 하나뿐이고, 화면이나 `HandOverlayPainter`는
+건드릴 필요가 없다.

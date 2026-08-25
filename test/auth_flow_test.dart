@@ -7,6 +7,8 @@ import 'package:signid/services/mock_api_client.dart';
 import 'package:signid/state/auth_flow_controller.dart';
 import 'package:signid/state/providers.dart';
 
+import 'test_helpers.dart';
+
 /// 항상 통과를 돌려주는 API. 상태 머신 검증에 무작위성이 끼어들면 안 된다.
 class _AlwaysPassApi implements ApiClient {
   VerifyRequest? lastRequest;
@@ -35,7 +37,10 @@ void main() {
   test('kUseFakeLandmarks 경로로 idle→done 전체 흐름이 끝까지 진행된다', () async {
     final api = _AlwaysPassApi();
     final container = ProviderContainer(
-      overrides: [apiClientProvider.overrideWithValue(api)],
+      overrides: [
+        apiClientProvider.overrideWithValue(api),
+        fakeLandmarkSourceOverride,
+      ],
     );
     addTearDown(container.dispose);
 
@@ -85,7 +90,10 @@ void main() {
   test('전송 요청의 tMs가 실제 경과 시간이고 균등 간격이 아니다', () async {
     final api = _AlwaysPassApi();
     final container = ProviderContainer(
-      overrides: [apiClientProvider.overrideWithValue(api)],
+      overrides: [
+        apiClientProvider.overrideWithValue(api),
+        fakeLandmarkSourceOverride,
+      ],
     );
     addTearDown(container.dispose);
 

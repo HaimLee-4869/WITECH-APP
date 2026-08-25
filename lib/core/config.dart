@@ -12,7 +12,7 @@ const bool kUseMockApi = true;
 ///
 /// 에뮬레이터·CI처럼 실제 손이 없는 환경에서 상태 머신과 오버레이를 검증하는 용도.
 /// 실기기 테스트 시 false로 바꾼다.
-const bool kUseFakeLandmarks = true;
+const bool kUseFakeLandmarks = false;
 
 // ─── 캡처 파라미터 ────────────────────────────────────────────────
 

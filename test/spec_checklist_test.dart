@@ -14,6 +14,8 @@ import 'package:signid/services/landmark_source.dart';
 import 'package:signid/state/auth_flow_controller.dart';
 import 'package:signid/state/providers.dart';
 
+import 'test_helpers.dart';
+
 /// SPEC 11장 완료 기준 중 코드로 확인할 수 있는 항목들을 직접 검증한다.
 
 class _StubApi implements ApiClient {
@@ -70,7 +72,10 @@ Future<ProviderContainer> _runToDone(
   Duration limit = const Duration(seconds: 25),
 }) async {
   final container = ProviderContainer(
-    overrides: [apiClientProvider.overrideWithValue(api)],
+    overrides: [
+        apiClientProvider.overrideWithValue(api),
+        fakeLandmarkSourceOverride,
+      ],
   );
   final sub = container.listen(authFlowProvider, (_, _) {});
   addTearDown(sub.close);
@@ -105,7 +110,10 @@ void main() {
         ),
       );
       final container = ProviderContainer(
-        overrides: [apiClientProvider.overrideWithValue(api)],
+        overrides: [
+        apiClientProvider.overrideWithValue(api),
+        fakeLandmarkSourceOverride,
+      ],
       );
       final sub = container.listen(authFlowProvider, (_, _) {});
       addTearDown(sub.close);

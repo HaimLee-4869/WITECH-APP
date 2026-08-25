@@ -94,6 +94,14 @@ class OnDeviceLandmarkSource implements LandmarkSource {
         ..start();
       await camera.startImageStream(_onCameraImage);
       _running = true;
+
+      // 오버레이 정렬은 이 두 값에 전적으로 좌우된다. 기기마다 다르므로,
+      // 다른 기기에서 뼈대가 어긋나면 먼저 이 로그부터 확인할 것.
+      debugPrint(
+        'SignID/camera sensorOrientation=${description.sensorOrientation} '
+        'previewSize=${camera.value.previewSize} '
+        'lens=${description.lensDirection}',
+      );
     } on CameraException catch (e) {
       // 다른 앱이 카메라를 점유했거나 초기화에 실패한 경우.
       _controller.addError(
@@ -148,13 +156,25 @@ class OnDeviceLandmarkSource implements LandmarkSource {
     if (camera == null || !camera.value.isInitialized) return null;
     // 원 안을 꽉 채우도록 cover로 깐다. HandOverlayPainter의 sourceAspectRatio
     // 계산과 같은 규칙이어야 오버레이가 프리뷰 위에 정확히 겹친다.
-    return FittedBox(
+    final preview = FittedBox(
       fit: BoxFit.cover,
       child: SizedBox(
         width: camera.value.previewSize?.height ?? 1,
         height: camera.value.previewSize?.width ?? 1,
         child: CameraPreview(camera),
       ),
+    );
+
+    // 전면 카메라 프리뷰를 거울처럼 좌우 반전한다. (SPEC 8.2)
+    //
+    // Android의 camera 플러그인은 전면 카메라 프리뷰를 반전하지 않고 센서가 보는
+    // 그대로 띄운다. 반면 오버레이는 [transform]의 mirror=true로 반전되므로,
+    // 여기서 프리뷰를 반전하지 않으면 뼈대가 실제 손의 거울상 위치에 그려진다.
+    // (실기기에서 확인한 실제 증상이다.) 둘 다 반전해야 겹친다.
+    return Transform(
+      alignment: Alignment.center,
+      transform: Matrix4.identity()..scaleByDouble(-1.0, 1.0, 1.0, 1.0),
+      child: preview,
     );
   }
 
@@ -163,14 +183,18 @@ class OnDeviceLandmarkSource implements LandmarkSource {
     final camera = _camera;
     final preview = camera?.value.previewSize;
     return LandmarkTransform(
-      // 플러그인의 processFrame()에 sensorOrientation을 넘기면 네이티브 쪽에서
-      // 비트맵을 미리 회전시킨 뒤 추론한다. 즉 돌아오는 좌표는 이미 세로 기준이라
-      // 여기서 또 돌리면 이중 회전이 된다. 실기기에서 오버레이가 90도 틀어져
-      // 보이면 이 값만 조정하면 되고, 화면/페인터 코드는 건드릴 필요가 없다.
-      rotationDegrees: 0,
-      // 전면 카메라 프리뷰는 거울처럼 보여야 자연스럽다. 표시 전용 반전이며
-      // _toHandFrame()이 만드는 전송용 좌표에는 적용하지 않는다. (SPEC 8.2)
-      mirror: true,
+      // 플러그인이 돌려주는 좌표는 **센서 프레임 그대로**다. processFrame()에
+      // sensorOrientation을 넘기지만 그건 추론용이고, 결과 좌표를 세로 기준으로
+      // 돌려주지는 않는다. 그래서 표시할 때 여기서 직접 돌려야 한다.
+      //
+      // Galaxy A34(전면, sensorOrientation=270)에서 실측해 확인했다. 손이 원의
+      // (0.245, 0.652)에 있을 때 원좌표는 (0.350, 0.262)였고,
+      // (x,y) → (y, 1-x) = 270도 회전이 정확히 겹쳤다.
+      rotationDegrees: camera?.description.sensorOrientation ?? 0,
+      // 회전만으로 위치가 맞는다. 여기서 추가로 반전하면 오히려 어긋난다.
+      // 프리뷰 자체는 buildPreview()에서 거울처럼 반전해 띄운다. (SPEC 8.2)
+      // 전송용 좌표는 어느 쪽이든 손대지 않은 원본이다. (SPEC 원칙 A)
+      mirror: false,
       // previewSize는 센서 방향 기준(가로)이라 세로 화면에서는 뒤집어 쓴다.
       sourceAspectRatio: preview == null
           ? null

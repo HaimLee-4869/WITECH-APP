@@ -25,8 +25,11 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(enrollProvider.notifier).attach();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await ref.read(enrollProvider.notifier).attach();
+      // 카메라 초기화가 끝나야 buildPreview()가 위젯을 돌려준다. (auth_screen 참고)
+      if (mounted) setState(() {});
     });
   }
 

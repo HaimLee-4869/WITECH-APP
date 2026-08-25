@@ -26,8 +26,13 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
   void initState() {
     super.initState();
     // build 중에 provider를 건드리면 안 되므로 첫 프레임 뒤에 소스를 켠다.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.read(authFlowProvider.notifier).attach();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await ref.read(authFlowProvider.notifier).attach();
+      // 카메라 초기화가 끝나야 buildPreview()가 위젯을 돌려준다. 그 전에 그린
+      // 화면은 원 안이 비어 있으므로 여기서 한 번 다시 그린다. 이게 없으면
+      // 상태가 바뀔 때까지 프리뷰가 나타나지 않는다. (실기기에서 확인한 증상)
+      if (mounted) setState(() {});
     });
   }
 

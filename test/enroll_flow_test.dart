@@ -7,6 +7,8 @@ import 'package:signid/services/api_client.dart';
 import 'package:signid/state/enroll_controller.dart';
 import 'package:signid/state/providers.dart';
 
+import 'test_helpers.dart';
+
 class _RecordingApi implements ApiClient {
   EnrollRequest? lastEnroll;
 
@@ -32,7 +34,10 @@ void main() {
   test('등록은 같은 제스처를 5회 모아 한 번에 전송한다', () async {
     final api = _RecordingApi();
     final container = ProviderContainer(
-      overrides: [apiClientProvider.overrideWithValue(api)],
+      overrides: [
+        apiClientProvider.overrideWithValue(api),
+        fakeLandmarkSourceOverride,
+      ],
     );
     addTearDown(container.dispose);
 

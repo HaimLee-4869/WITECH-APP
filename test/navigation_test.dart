@@ -13,6 +13,8 @@ import 'package:signid/screens/result_screen.dart';
 import 'package:signid/services/api_client.dart';
 import 'package:signid/state/providers.dart';
 
+import 'test_helpers.dart';
+
 /// 지연 없이 즉시 응답하는 API. 위젯 테스트에서 타이머를 기다리지 않기 위함.
 class _InstantApi implements ApiClient {
   @override
@@ -54,7 +56,10 @@ class _InstantApi implements ApiClient {
 }
 
 Widget _app() => ProviderScope(
-  overrides: [apiClientProvider.overrideWithValue(_InstantApi())],
+  overrides: [
+    apiClientProvider.overrideWithValue(_InstantApi()),
+    fakeLandmarkSourceOverride,
+  ],
   child: MaterialApp(theme: buildAppTheme(), home: const HomeScreen()),
 );
 
