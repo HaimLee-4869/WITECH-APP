@@ -38,6 +38,7 @@ python scripts/03_analyze_distributions.py      # 분포 측정 -> reports/
 python scripts/04_derive_thresholds.py          # 임계값 도출 -> configs/challenge_config.json
 python scripts/05_validate_rules.py             # 혼동 행렬 + SPEC 4.11 목표 대비
 python scripts/run_challenge.py --participant P01   # 웹캠 실시간 프로토타입
+python scripts/06_analyze_sessions.py           # 실시간 세션 집계 + 파일럿 대비 갭
 pytest                                          # 합성 랜드마크 기반 단위 테스트
 ```
 
@@ -52,9 +53,20 @@ pytest                                          # 합성 랜드마크 기반 단
 - 오른쪽 위 **안내 패널**에 요청 동작을 그림으로 보여준다. 손 모양은 어느 손가락을
   펴야 하는지, 이동은 어느 쪽으로 가야 하는지 화살표로 나온다. 아래쪽 작은 아이콘
   3개는 전체 단계이며 현재 단계가 노란 테두리로 표시된다.
+- 손 그림은 MediaPipe 21점 연결 구조로 그린다(`scripts/hand_sketch.py`).
+  펴는 손가락은 초록, 접는 손가락은 회색이다.
 - 안내 그림은 `SHAPE_PATTERNS`와 config의 `direction_map`에서 직접 만든다. 그림과
   판정 규칙이 어긋날 수 없고, `tests/test_guide_overlay.py`가 이를 검증한다.
 - 엄지는 판정에서 빼므로 안내 그림에서도 회색으로만 그린다.
+- **이동 단계에서는 왼쪽에 판정 계측 패널이 뜬다.** 두 관문의 현재 값을 그대로
+  보여준다. 임계값을 짐작해서 바꾸기 전에 무엇이 막고 있는지부터 눈으로 본다.
+
+```
+window       15/15                    O
+gate1 disp   0.42 / 0.169  x2.49      O     <- 변위 크기 / 임계값 / 배수
+gate2 axis   2.10 / 4.19   x0.50      X     <- 주축비 / 임계값 / 배수
+axis         y+   -> NONE                   <- 주축과 부호, 최종 라벨
+```
 
 시도가 끝날 때마다 **이번 실행의 사유별 통계**를 화면(결과 화면 왼쪽)과 콘솔에
 같이 띄운다. 여러 번 돌린 뒤 무엇이 걸림돌인지 바로 보기 위한 것이다.
@@ -169,6 +181,30 @@ SPEC 4.11 목표 10개 중 **9개 달성**.
 지나가므로, 즉시 실패시키면 정상 수행도 통과할 수 없다.
 
 **(2) 좌우 반전 이중 적용 수정.** 아래 5.7 참조.
+
+### 4.2 실시간 세션 집계 (`06_analyze_sessions.py`)
+
+`data/sessions/results.csv`를 읽어 무엇이 병목인지 집계한다.
+
+- 실패 사유별 횟수와 **막힌 단계**
+- 요청 동작별 통과율 (어느 동작이 유독 안 되는지)
+- **이동 관문별 통과 비율**: 평가된 윈도우 중 1번 관문(변위 크기)을 통과한 비율,
+  그중 2번 관문(주축 지배)을 통과한 비율
+- 시도 단위 병목: 1번을 한 번도 못 넘은 횟수 / 1번은 넘었지만 2번에서 막힌 횟수
+- **파일럿 촬영 vs 실시간 사용 비교**
+
+마지막 항목이 핵심이다. 파일럿 영상은 폰을 거치하고 의식적으로 반듯하게 찍은
+것이라 실시간 사용 조건과 다를 수 있다. 이 스크립트는 파일럿 영상에도 실시간과
+**같은 윈도우 길이·같은 진입/이탈 제외 규칙·같은 관문 조건**을 적용해 다시 재고,
+두 분포를 나란히 놓는다. 갭이 있다면 숫자로 드러난다.
+
+주축비는 최대치와 중앙값을 같이 본다. 부축 변위가 0에 가까운 윈도우 하나가
+최대치를 수천 배로 끌어올려 분포 비교에 쓸 수 없기 때문이다. 주축비는 변위
+관문을 통과한 윈도우에서만 모은다. 거의 안 움직인 윈도우의 주축비는 잡음이다.
+
+`results.csv`에는 그때의 임계값(`move_min_disp_threshold`,
+`move_axis_threshold`, `move_window_ms`)도 같이 적힌다. 나중에 임계값이 바뀌어도
+과거 기록을 해석할 수 있다.
 
 ## 5. 알려진 한계
 
@@ -302,7 +338,8 @@ core/
   challenge_generator.py    secrets 기반 무작위 Challenge 생성
   challenge_state_machine.py 순서·시간 관리. UI 프레임워크 의존 없음
 scripts/
-  guide_overlay.py          요청 동작 안내 그림. 판정 규칙에서 직접 생성
+  guide_overlay.py          요청 동작 안내 패널. 판정 규칙에서 직접 생성
+  hand_sketch.py            MediaPipe 21점 구조로 손 뼈대 그리기 (그림 전용)
   challenge_logger.py       세션 결과 저장 + 실행 중 사유별 통계(RunStats)
 ```
 

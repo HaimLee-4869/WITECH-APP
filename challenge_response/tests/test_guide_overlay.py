@@ -16,6 +16,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 import guide_overlay as G  # noqa: E402
+import hand_sketch  # noqa: E402
 
 from core.hand_action_detector import SHAPE_PATTERNS  # noqa: E402
 from core.movement_detector import MIRRORED, RAW, MovementDetector  # noqa: E402
@@ -118,7 +119,8 @@ def test_extended_fingers_are_drawn_taller_than_curled():
     def finger_pixels(action):
         canvas = np.zeros((480, 640, 3), np.uint8)
         G.draw_guide(canvas, action, BASE_CONFIG)
-        return int(np.count_nonzero(np.all(canvas == G.FINGER_ON, axis=2)))
+        return int(np.count_nonzero(
+            np.all(canvas == hand_sketch.EXTENDED_COLOUR, axis=2)))
 
     assert finger_pixels("OPEN_PALM") > finger_pixels("TWO_FINGERS")
     assert finger_pixels("TWO_FINGERS") > finger_pixels("INDEX")

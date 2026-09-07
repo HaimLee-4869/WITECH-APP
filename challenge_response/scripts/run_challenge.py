@@ -55,6 +55,61 @@ def draw_landmarks(frame, landmarks, width, height) -> None:
         cv2.circle(frame, (x, y), 3, GREEN, -1)
 
 
+def draw_move_debug(frame, probe, config) -> None:
+    """이동 판정의 두 관문이 지금 어떤 값인지 그대로 보여준다.
+
+    임계값을 짐작해서 바꾸기 전에, 무엇이 막고 있는지부터 눈으로 본다.
+    """
+    movement = config["movement"]
+    min_disp = movement.get("min_displacement_ratio")
+    axis_min = movement.get("axis_dominance_ratio")
+
+    lines = []
+    filled, needed = probe.frames_filled, probe.frames_needed
+    # 윈도우가 아직 안 찼는 건 실패가 아니므로 X를 붙이지 않는다.
+    lines.append(("window", f"{filled}/{needed}",
+                  True if probe.window_ready else None))
+
+    if not probe.window_ready:
+        lines.append(("gate1 disp", "waiting", None))
+        lines.append(("gate2 axis", "waiting", None))
+        lines.append(("axis", "-", None))
+    else:
+        disp = probe.displacement_ratio
+        disp_text = ("--" if not np.isfinite(disp)
+                     else f"{disp:.2f} / {min_disp:.3f}  x{disp / min_disp:.2f}")
+        lines.append(("gate1 disp", disp_text, probe.displacement_ok))
+
+        axis_ratio = probe.axis_ratio
+        if not np.isfinite(axis_ratio):
+            axis_text = "inf (pure axis)"
+        else:
+            axis_text = f"{axis_ratio:.2f} / {axis_min:.2f}  x{axis_ratio / axis_min:.2f}"
+        lines.append(("gate2 axis", axis_text, probe.axis_ok))
+
+        sign = "+" if probe.sign > 0 else ("-" if probe.sign < 0 else "?")
+        lines.append(("axis", f"{probe.axis}{sign}   -> {probe.label}", None))
+
+    pad, line_h, box_w = 10, 20, 300
+    box_h = pad * 2 + line_h * len(lines)
+    x, y = 14, 150
+
+    panel = frame[y:y + box_h, x:x + box_w]
+    if panel.shape[0] != box_h or panel.shape[1] != box_w:
+        return
+    cv2.addWeighted(panel, 0.2, np.full_like(panel, (30, 30, 30), np.uint8), 0.8, 0, panel)
+    cv2.rectangle(frame, (x, y), (x + box_w, y + box_h), (90, 90, 90), 1)
+
+    for i, (label, text, ok) in enumerate(lines):
+        base = y + pad + line_h * (i + 1) - 6
+        cv2.putText(frame, label, (x + pad, base), FONT, 0.44, GREY, 1, cv2.LINE_AA)
+        colour = WHITE if ok is None else (GREEN if ok else RED)
+        cv2.putText(frame, text, (x + pad + 92, base), FONT, 0.44, colour, 1, cv2.LINE_AA)
+        if ok is not None:
+            cv2.putText(frame, "O" if ok else "X", (x + box_w - 24, base),
+                        FONT, 0.5, colour, 2, cv2.LINE_AA)
+
+
 def draw_stats(frame, stats) -> None:
     """이번 실행의 사유별 통계. 결과 화면에서만 띄운다."""
     if stats.attempts == 0:
@@ -117,6 +172,8 @@ def draw_hud(frame, status, challenge, detected_shape, detected_move, config,
 
     if status.current_action and not status.finished:
         guide_overlay.draw_guide(frame, status.current_action, config)
+        if status.move_probe is not None:
+            draw_move_debug(frame, status.move_probe, config)
     guide_overlay.draw_next_actions(frame, challenge.actions,
                                     status.step_index, config)
     cv2.putText(frame, "  ".join(challenge.actions), (16, h - 10), FONT, 0.45, GREY, 1)
@@ -231,7 +288,7 @@ def main() -> int:
             if status.finished and not saved:
                 writer.release()
                 recorder.save_landmarks(fps, width, height)
-                append_result(csv_path, recorder, status, now_ms)
+                append_result(csv_path, recorder, status, now_ms, config)
                 stats.record(status, now_ms)
                 # 파이프로 실행해도 요약이 바로 보이도록 flush 한다.
                 print(f"\n결과: {status.state.name}"

@@ -103,6 +103,13 @@ CSV_FIELDS = [
     "elapsed_1_ms", "elapsed_2_ms", "elapsed_3_ms",
     "retries_1", "retries_2", "retries_3",
     "frames", "detected_frames", "video_path", "landmark_path",
+    # 이동 단계 진단. 어느 관문이 병목인지 나중에 집계하려고 남긴다.
+    "move_action", "move_step", "move_passed", "move_windows",
+    "move_disp_pass", "move_axis_pass",
+    "move_max_disp_ratio", "move_med_disp_ratio",
+    "move_max_axis_ratio", "move_med_axis_ratio", "move_dominant_axis",
+    # 임계값이 바뀌어도 과거 기록을 해석할 수 있도록 당시 값을 같이 적는다.
+    "move_min_disp_threshold", "move_axis_threshold", "move_window_ms",
 ]
 
 
@@ -157,8 +164,49 @@ class SessionRecorder:
         return self.landmark_path
 
 
+def _movement_columns(status: Status, config: Optional[dict]) -> dict:
+    """이동 단계의 관문별 통과 횟수와 최대치."""
+    blank = {key: "" for key in (
+        "move_action", "move_step", "move_passed", "move_windows",
+        "move_disp_pass", "move_axis_pass",
+        "move_max_disp_ratio", "move_med_disp_ratio",
+        "move_max_axis_ratio", "move_med_axis_ratio", "move_dominant_axis",
+        "move_min_disp_threshold", "move_axis_threshold", "move_window_ms")}
+
+    movement = (config or {}).get("movement", {})
+    blank["move_min_disp_threshold"] = movement.get("min_displacement_ratio", "")
+    blank["move_axis_threshold"] = movement.get("axis_dominance_ratio", "")
+    blank["move_window_ms"] = movement.get("window_ms", "")
+
+    for index, step in enumerate(status.steps, start=1):
+        if step.move is None:
+            continue
+        stats = step.move
+        blank.update({
+            "move_action": step.action,
+            "move_step": index,
+            "move_passed": int(step.passed),
+            "move_windows": stats.windows,
+            "move_disp_pass": stats.displacement_pass,
+            "move_axis_pass": stats.axis_pass,
+            "move_max_disp_ratio": _fmt(stats.max_displacement_ratio),
+            "move_med_disp_ratio": _fmt(stats.median_displacement_ratio),
+            "move_max_axis_ratio": _fmt(stats.max_axis_ratio),
+            "move_med_axis_ratio": _fmt(stats.median_axis_ratio),
+            "move_dominant_axis": stats.dominant_axis,
+        })
+        break
+    return blank
+
+
+def _fmt(value: float) -> str:
+    if value is None or not np.isfinite(value):
+        return ""
+    return f"{value:.4f}"
+
+
 def append_result(csv_path: Path, recorder: SessionRecorder, status: Status,
-                  elapsed_ms: float) -> None:
+                  elapsed_ms: float, config: Optional[dict] = None) -> None:
     """결과 CSV에 한 줄 추가한다. 파일이 없으면 헤더부터 쓴다."""
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     is_new = not csv_path.exists()
@@ -185,6 +233,7 @@ def append_result(csv_path: Path, recorder: SessionRecorder, status: Status,
         row[f"passed_{i}"] = int(step.passed) if step else ""
         row[f"elapsed_{i}_ms"] = round(step.elapsed_ms, 1) if step else ""
         row[f"retries_{i}"] = step.retries_used if step else ""
+    row.update(_movement_columns(status, config))
 
     with open(csv_path, "a", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_FIELDS)

@@ -59,12 +59,96 @@ class Observation:
 
 
 @dataclass
+class MoveProbe:
+    """이동 판정 한 번의 중간값. 어느 관문에서 막혔는지 보려고 남긴다."""
+    frames_filled: int = 0
+    frames_needed: int = 0
+    displacement_ratio: float = float("nan")
+    axis_ratio: float = float("nan")
+    axis: str = "none"
+    sign: int = 0
+    label: str = NONE
+    reason: str = "NO_DATA"
+
+    @property
+    def window_ready(self) -> bool:
+        return self.frames_needed > 0 and self.frames_filled >= self.frames_needed
+
+    @property
+    def displacement_ok(self) -> bool:
+        """1번 관문(변위 크기)을 통과했는지."""
+        return self.reason in ("NOT_AXIS_DOMINANT", "UNMAPPED_AXIS", "OK")
+
+    @property
+    def axis_ok(self) -> bool:
+        """2번 관문(주축 지배력)을 통과했는지."""
+        return self.reason in ("UNMAPPED_AXIS", "OK")
+
+
+@dataclass
+class MoveStats:
+    """한 이동 단계 동안 관문별로 몇 번 통과했는지, 값은 어디까지 갔는지.
+
+    최대치와 중앙값을 같이 남긴다. 최대 주축비는 부축 변위가 0에 가까운 윈도우
+    하나에 좌우돼 분포 비교에 못 쓰기 때문이다.
+    """
+    windows: int = 0
+    displacement_pass: int = 0
+    axis_pass: int = 0
+    axis_counts: dict = field(default_factory=dict)
+    displacements: list = field(default_factory=list)
+    # 주축비는 변위 관문을 통과한 윈도우에서만 의미가 있다. 손이 거의 안 움직인
+    # 윈도우의 주축비는 잡음이다.
+    axis_ratios: list = field(default_factory=list)
+
+    def record(self, probe: MoveProbe) -> None:
+        if not probe.window_ready or probe.reason == "NO_TRACK":
+            return
+        self.windows += 1
+        self.displacement_pass += int(probe.displacement_ok)
+        self.axis_pass += int(probe.axis_ok)
+        if np.isfinite(probe.displacement_ratio):
+            self.displacements.append(float(probe.displacement_ratio))
+        if probe.displacement_ok and np.isfinite(probe.axis_ratio):
+            self.axis_ratios.append(float(probe.axis_ratio))
+        if probe.axis in ("x", "y"):
+            self.axis_counts[probe.axis] = self.axis_counts.get(probe.axis, 0) + 1
+
+    @staticmethod
+    def _stat(values: list, function) -> float:
+        return float(function(values)) if values else float("nan")
+
+    @property
+    def max_displacement_ratio(self) -> float:
+        return self._stat(self.displacements, np.max)
+
+    @property
+    def median_displacement_ratio(self) -> float:
+        return self._stat(self.displacements, np.median)
+
+    @property
+    def max_axis_ratio(self) -> float:
+        return self._stat(self.axis_ratios, np.max)
+
+    @property
+    def median_axis_ratio(self) -> float:
+        return self._stat(self.axis_ratios, np.median)
+
+    @property
+    def dominant_axis(self) -> str:
+        if not self.axis_counts:
+            return ""
+        return max(self.axis_counts, key=self.axis_counts.get)
+
+
+@dataclass
 class StepResult:
     action: str
     passed: bool = False
     fail_reason: Optional[FailReason] = None
     elapsed_ms: float = 0.0
     retries_used: int = 0
+    move: Optional[MoveStats] = None
 
 
 @dataclass
@@ -80,6 +164,7 @@ class Status:
     remaining_ms: float = 0.0
     fail_reason: Optional[FailReason] = None
     steps: list[StepResult] = field(default_factory=list)
+    move_probe: Optional[MoveProbe] = None   # 이동 단계에서만 채워진다
 
     @property
     def finished(self) -> bool:
@@ -246,18 +331,34 @@ class ChallengeStateMachine:
         coords = obs.screen_coords
         self._centers.append(g.palm_center(coords))
         self._scales.append(g.hand_scale(coords))
-        if len(self._scales) < self._scales.maxlen:
-            return self._status()
+
+        needed = self._scales.maxlen
+        probe = MoveProbe(frames_filled=len(self._scales), frames_needed=needed)
+        if len(self._scales) < needed:
+            return self._status(move_probe=probe)
 
         result = self.movement_detector.detect_from_tracks(
             np.array(self._centers), np.array(self._scales))
+        probe = MoveProbe(
+            frames_filled=len(self._scales), frames_needed=needed,
+            displacement_ratio=result.displacement_ratio,
+            axis_ratio=result.axis_ratio, axis=result.axis, sign=result.sign,
+            label=result.label, reason=result.reason)
+        self._move_stats().record(probe)
+
         if result.label == action:
             return self._advance(obs.timestamp_ms)
         if result.label != NONE:
             # 손 모양과 마찬가지로 즉시 실패시키지 않는다. 왕복 동작 중에는
             # 반대 방향 획도 반드시 지나가기 때문이다.
             self._sustained_wrong = result.label
-        return self._status(detected_move=result.label)
+        return self._status(detected_move=result.label, move_probe=probe)
+
+    def _move_stats(self) -> MoveStats:
+        step = self.steps[self.step_index]
+        if step.move is None:
+            step.move = MoveStats()
+        return step.move
 
     def _timeout_reason(self, action: str) -> FailReason:
         """제한 시간이 지났을 때, 그동안 한 동작으로 실패 사유를 정한다."""
@@ -315,7 +416,8 @@ class ChallengeStateMachine:
         return self._status()
 
     def _status(self, detected_shape: str = UNKNOWN, confidence: float = 0.0,
-                detected_move: str = NONE) -> Status:
+                detected_move: str = NONE,
+                move_probe: Optional[MoveProbe] = None) -> Status:
         remaining = 0.0
         if self._step_started_ms is not None and self.state == State.ACTION:
             remaining = max(self.per_action_timeout_ms -
@@ -331,4 +433,5 @@ class ChallengeStateMachine:
             remaining_ms=remaining,
             fail_reason=self.fail_reason,
             steps=list(self.steps),
+            move_probe=move_probe,
         )
