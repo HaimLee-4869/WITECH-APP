@@ -1,0 +1,11 @@
+{
+  "_comment": "04_derive_thresholds.py가 분포에서 임계값을 뽑을 때 쓰는 규칙. 임계값 자체가 아니라 '도출 방법'이다.",
+  "positive_percentile": 5,
+  "negative_percentile": 95,
+  "separation_margin_ratio": 0.5,
+  "hold_frames_percentile": 50,
+  "hold_frames_min": 3,
+  "timeout_percentile": 95,
+  "timeout_round_ms": 500,
+  "lost_frames_percentile": 95
+}

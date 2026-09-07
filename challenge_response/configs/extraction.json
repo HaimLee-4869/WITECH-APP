@@ -1,0 +1,10 @@
+{
+  "_comment": "MediaPipe Hands 추출 설정. SPEC 4.1에 고정된 값이며 판정 임계값이 아니다.",
+  "mediapipe_hands": {
+    "static_image_mode": false,
+    "max_num_hands": 1,
+    "min_detection_confidence": 0.5,
+    "min_tracking_confidence": 0.5,
+    "model_complexity": 1
+  }
+}

@@ -46,3 +46,11 @@ flutter_*.png
 # Symbolication / obfuscation
 app.*.symbols
 app.*.map.json
+
+# challenge_response (Python 안티스푸핑 모듈)
+challenge_response/.venv/
+challenge_response/data/
+challenge_response/reports/
+__pycache__/
+.pytest_cache/
+*.mp4

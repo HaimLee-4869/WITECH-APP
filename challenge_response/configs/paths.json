@@ -1,0 +1,7 @@
+{
+  "video_root": "C:/Users/3425e/witech_data",
+  "landmark_cache": "./data/landmarks",
+  "session_out": "./data/sessions",
+  "report_out": "./reports",
+  "mirror_flip": {}
+}
