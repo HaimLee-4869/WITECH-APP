@@ -1,5 +1,5 @@
 {
-  "_comment": "04_derive_thresholds.py가 분포에서 임계값을 뽑을 때 쓰는 규칙. 임계값 자체가 아니라 '도출 방법'이다.",
+  "_comment": "04_derive_thresholds.py가 분포에서 임계값을 뽑을 때 쓰는 규칙과 03_analyze_distributions.py가 훑을 후보 격자. 임계값 자체가 아니라 '도출 방법'이다.",
   "positive_percentile": 5,
   "negative_percentile": 95,
   "separation_margin_ratio": 0.5,
@@ -7,5 +7,31 @@
   "hold_frames_min": 3,
   "timeout_percentile": 95,
   "timeout_round_ms": 500,
-  "lost_frames_percentile": 95
+  "lost_frames_percentile": 95,
+  "motion_window_ms_grid": [
+    200,
+    300,
+    400,
+    500,
+    600,
+    700,
+    800,
+    900,
+    1000,
+    1100,
+    1200,
+    1300,
+    1400,
+    1500,
+    1600,
+    1700,
+    1800,
+    1900,
+    2000
+  ],
+  "angle_spaces_considered": [
+    "image_iso",
+    "world"
+  ],
+  "histogram_bins": 40
 }
