@@ -29,6 +29,7 @@ from core.challenge_state_machine import (ChallengeStateMachine,  # noqa: E402
 from core.hand_action_detector import HandActionDetector  # noqa: E402
 from core.landmark_io import HERE, load_json, load_paths  # noqa: E402
 from core.movement_detector import MovementDetector  # noqa: E402
+import guide_overlay  # noqa: E402
 
 WHITE, GREEN, RED, YELLOW, GREY = ((255, 255, 255), (80, 220, 120),
                                    (70, 70, 235), (60, 200, 240), (170, 170, 170))
@@ -43,9 +44,10 @@ ACTION_CAPTION = {
 
 
 def draw_landmarks(frame, landmarks, width, height) -> None:
+    """원본 좌표 랜드마크를 거울 화면 위에 그린다 (x -> 1-x)."""
     import mediapipe as mp
     connections = mp.solutions.hands.HAND_CONNECTIONS
-    pts = [(int(p[0] * width), int(p[1] * height)) for p in landmarks]
+    pts = [(int((1.0 - p[0]) * width), int(p[1] * height)) for p in landmarks]
     for a, b in connections:
         cv2.line(frame, pts[a], pts[b], GREY, 2)
     for x, y in pts:
@@ -83,7 +85,12 @@ def draw_hud(frame, status, challenge, detected_shape, detected_move, config) ->
 
     cv2.putText(frame, f"shape={detected_shape}  move={detected_move}",
                 (16, 122), FONT, 0.6, GREY, 1)
-    cv2.putText(frame, "  ".join(challenge.actions), (16, h - 16), FONT, 0.5, GREY, 1)
+
+    if status.current_action and not status.finished:
+        guide_overlay.draw_guide(frame, status.current_action, config)
+    guide_overlay.draw_next_actions(frame, challenge.actions,
+                                    status.step_index, config)
+    cv2.putText(frame, "  ".join(challenge.actions), (16, h - 10), FONT, 0.45, GREY, 1)
 
 
 def new_session(config, participant, session_dir, fps):
@@ -129,6 +136,7 @@ def main() -> int:
     session_dir.mkdir(parents=True, exist_ok=True)
     csv_path = session_dir / "results.csv"
 
+    print("화면은 거울처럼 좌우가 뒤집혀 보인다. 화면에 보이는 방향으로 움직이면 된다.")
     participant = args.participant
     challenge, machine, recorder = new_session(config, participant, session_dir, fps)
     writer = cv2.VideoWriter(str(recorder.video_path),
@@ -141,8 +149,12 @@ def main() -> int:
             ok, frame_bgr = cap.read()
             if not ok:
                 break
-            # 거울처럼 보여준다. 이후 좌표는 전부 이 화면 기준이다.
-            frame_bgr = cv2.flip(frame_bgr, 1)
+            # MediaPipe에는 원본 프레임을 준다. 뒤집은 프레임을 넣으면
+            #   (1) handedness가 반대로 나오고,
+            #   (2) config의 coordinate_frame="mirrored"가 좌우를 한 번 더
+            #       뒤집어 MOVE_LEFT/RIGHT 판정이 통째로 반대가 된다.
+            # 저장도 원본으로 한다. 파일럿 영상과 같은 좌표계여야 나중에 함께
+            # 분석할 수 있다. 화면 표시만 거울처럼 뒤집는다.
             writer.write(frame_bgr)
 
             rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -178,10 +190,11 @@ def main() -> int:
                 shape_label = machine.shape_detector.detect(observation.angle_coords).label
                 move_label = status.detected_move
 
+            display = cv2.flip(frame_bgr, 1)
             if landmarks is not None:
-                draw_landmarks(frame_bgr, landmarks, width, height)
-            draw_hud(frame_bgr, status, challenge, shape_label, move_label, config)
-            cv2.imshow("Challenge-Response", frame_bgr)
+                draw_landmarks(display, landmarks, width, height)
+            draw_hud(display, status, challenge, shape_label, move_label, config)
+            cv2.imshow("Challenge-Response", display)
 
             if status.finished and not saved:
                 writer.release()

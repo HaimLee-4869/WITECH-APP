@@ -128,6 +128,8 @@ class ChallengeStateMachine:
         self._hold_streak = 0
         self._wrong_label: Optional[str] = None
         self._wrong_streak = 0
+        # 제한 시간 동안 사용자가 '확실히' 수행한 다른 동작. 타임아웃 때 사유를 정한다.
+        self._sustained_wrong: Optional[str] = None
         self._lost_streak = 0
         self._unstable_streak = 0
         self._retries_left = self.max_retries
@@ -177,7 +179,7 @@ class ChallengeStateMachine:
         if not status.finished and self.state == State.ACTION:
             elapsed = obs.timestamp_ms - self._step_started_ms
             if elapsed > self.per_action_timeout_ms:
-                return self._fail_step(FailReason.ACTION_TIMEOUT, obs.timestamp_ms)
+                return self._fail_step(self._timeout_reason(action), obs.timestamp_ms)
         return status
 
     # ------------------------------------------------------------ 내부
@@ -232,9 +234,11 @@ class ChallengeStateMachine:
         if self._wrong_streak < self.hold_frames:
             return self._status(result.label, result.confidence)
 
-        if result.label in self._future_actions():
-            return self._fail(FailReason.WRONG_ORDER, obs.timestamp_ms)
-        return self._fail_step(FailReason.WRONG_SHAPE, obs.timestamp_ms)
+        # 여기서 바로 실패시키면 사용자가 화면의 요청을 읽고 손 모양을 바꿀 시간이
+        # 없다. 손을 든 순간의 모양이 요청과 다르다는 이유로 0.3초 만에 끝나버린다.
+        # 무엇을 하고 있었는지만 기록하고, 제한 시간까지 기다린다.
+        self._sustained_wrong = result.label
+        return self._status(result.label, result.confidence)
 
     def _update_move(self, obs: Observation, action: str) -> Status:
         from . import geometry as g
@@ -250,10 +254,20 @@ class ChallengeStateMachine:
         if result.label == action:
             return self._advance(obs.timestamp_ms)
         if result.label != NONE:
-            if result.label in self._future_actions():
-                return self._fail(FailReason.WRONG_ORDER, obs.timestamp_ms)
-            return self._fail_step(FailReason.WRONG_DIRECTION, obs.timestamp_ms)
+            # 손 모양과 마찬가지로 즉시 실패시키지 않는다. 왕복 동작 중에는
+            # 반대 방향 획도 반드시 지나가기 때문이다.
+            self._sustained_wrong = result.label
         return self._status(detected_move=result.label)
+
+    def _timeout_reason(self, action: str) -> FailReason:
+        """제한 시간이 지났을 때, 그동안 한 동작으로 실패 사유를 정한다."""
+        wrong = self._sustained_wrong
+        if wrong is None:
+            return FailReason.ACTION_TIMEOUT
+        if wrong in self._future_actions():
+            return FailReason.WRONG_ORDER
+        return (FailReason.WRONG_SHAPE if is_shape_action(action)
+                else FailReason.WRONG_DIRECTION)
 
     def _future_actions(self) -> set[str]:
         return set(self.challenge.actions[self.step_index + 1:])
@@ -265,6 +279,7 @@ class ChallengeStateMachine:
         self.step_index += 1
         self._hold_streak = 0
         self._wrong_label, self._wrong_streak = None, 0
+        self._sustained_wrong = None
         self._centers.clear()
         self._scales.clear()
         self._retries_left = self.max_retries
@@ -282,6 +297,7 @@ class ChallengeStateMachine:
             self._step_started_ms = timestamp_ms
             self._hold_streak = 0
             self._wrong_label, self._wrong_streak = None, 0
+            self._sustained_wrong = None
             self._centers.clear()
             self._scales.clear()
             return self._status()
