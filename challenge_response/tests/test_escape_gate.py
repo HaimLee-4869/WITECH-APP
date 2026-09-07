@@ -130,6 +130,27 @@ def test_escape_streak_resets_when_returning_early():
     assert not machine.steps[1].passed
 
 
+def test_total_timeout_does_not_run_while_gate_is_closed():
+    """마지막 단계에 관문이 걸려도 전체 제한 시간으로 죽으면 안 된다.
+
+    단계 제한만 멈추고 전체 제한을 흐르게 두면 TOTAL_TIMEOUT으로 실패한다.
+    실기기에서 TWO_FINGERS -> MOVE_UP -> OPEN_PALM 조합으로 실제로 발생했다.
+    """
+    config = {**CONFIG, "timing": {**CONFIG["timing"], "total_timeout_ms": 4000}}
+    machine = build(["MOVE_RIGHT", "FIST", "OPEN_PALM"], config)
+    clock = Clock(machine)
+    window = machine.movement_detector.window_frames(FPS)
+    clock.move(1.0, 0.0, window + 2)
+    clock.shape("FIST", ESCAPE + config["shape_hold_frames"])
+    assert machine.steps[1].passed
+    # 마지막 단계 관문 앞에서 오래 머문다 (전체 제한 시간을 훌쩍 넘는 시간)
+    status = clock.shape("FIST", int(config["timing"]["total_timeout_ms"] / FRAME_MS) * 2)
+    assert status.state is not State.FAIL, "관문 대기 중 전체 제한 시간이 흘렀다"
+    clock.shape("INDEX", ESCAPE)
+    clock.shape("OPEN_PALM", config["shape_hold_frames"])
+    assert machine.steps[2].passed
+
+
 def test_timeout_does_not_run_while_gate_is_closed():
     """관문이 닫혀 있는 동안은 제한 시간을 소모하지 않는다."""
     machine, clock = move_then_shape()

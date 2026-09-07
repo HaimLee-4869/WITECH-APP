@@ -224,6 +224,7 @@ class ChallengeStateMachine:
         self._started_ms: Optional[float] = None
         self._step_started_ms: Optional[float] = None
         self._now_ms: float = 0.0
+        self._frame_delta_ms: float = 0.0
         self._hold_streak = 0
         self._wrong_label: Optional[str] = None
         self._wrong_streak = 0
@@ -255,6 +256,8 @@ class ChallengeStateMachine:
             return self._status()
         if self.state == State.IDLE:
             self.start(obs.timestamp_ms)
+        # 이탈 관문이 닫혀 있는 동안 시계를 멈추려면 프레임 간격이 필요하다.
+        self._frame_delta_ms = max(obs.timestamp_ms - self._now_ms, 0.0)
         self._now_ms = obs.timestamp_ms
 
         if obs.timestamp_ms - self._started_ms > self.total_timeout_ms:
@@ -326,7 +329,11 @@ class ChallengeStateMachine:
             else:
                 self._escape_streak = 0
             # 관문이 닫혀 있는 동안은 제한 시간을 소모하지 않는다.
+            # 단계 제한과 전체 제한을 같이 미뤄야 한다. 전체 제한만 흐르게 두면
+            # 마지막 단계에 관문이 걸릴 때 TOTAL_TIMEOUT으로 죽는다.
             self._step_started_ms = obs.timestamp_ms
+            if self._started_ms is not None:
+                self._started_ms += self._frame_delta_ms
             if self._escape_pending():
                 return self._status(result.label, result.confidence)
             self._escape_from = None

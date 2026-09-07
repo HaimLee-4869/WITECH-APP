@@ -58,5 +58,7 @@
     "diagonal_confirmed_max": 0.2
   },
   "escape_frames_min": 3,
-  "escape_frames_note": "단계 전환 시 이전 손 모양에서 '벗어났다'고 인정하는 연속 프레임 수. 손 모양을 유지하는 동안 발생하는 오검출 구간보다 길어야 잡음으로 관문이 열리지 않는다."
+  "escape_frames_note": "단계 전환 시 이전 손 모양에서 '벗어났다'고 인정하는 연속 프레임 수. 손 모양을 유지하는 동안 발생하는 오검출 구간보다 길어야 잡음으로 관문이 열리지 않는다.",
+  "escape_frames_basis": "max",
+  "escape_frames_basis_note": "이 항목만 negative_percentile을 쓰지 않고 관측된 오검출 구간의 최대치를 쓴다. 다른 임계값은 사용성 기준이라 드물게 어긋나도 재시도로 회복되지만, 이탈 관문은 보안 관문이라 잡음 구간 하나만 관문을 열어도 그 시도의 방어가 무력해진다. 'max'는 최대치+1, 'percentile'은 negative_percentile+1."
 }

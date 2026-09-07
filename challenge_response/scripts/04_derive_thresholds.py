@@ -226,17 +226,35 @@ def derive_escape_frames(frames: pd.DataFrame, labels: pd.Series,
         return minimum, "오검출 구간이 하나도 없어 하한값을 그대로 씀"
 
     array = np.asarray(noise_runs, dtype=float)
+    basis = policy.get("escape_frames_basis", "percentile")
     percentile = float(np.percentile(array, policy["negative_percentile"]))
-    escape = max(int(np.ceil(percentile)) + 1, minimum)
+    observed_max = float(array.max())
+
+    if basis == "max":
+        escape = max(int(np.ceil(observed_max)) + 1, minimum)
+        rule = (f"관측된 최대치 {observed_max:.0f}프레임 +1")
+        why = ("다른 임계값과 달리 negative_percentile을 쓰지 않는다. 이탈 관문은 "
+               "보안 관문이라 잡음 구간 하나만 관문을 열어도 그 시도의 방어가 "
+               f"무력해진다. p{policy['negative_percentile']}={percentile:.1f}로 잡으면 "
+               f"관측된 {int((array > np.ceil(percentile) + 1).sum())}개 구간이 "
+               "관문을 열 수 있다.")
+    else:
+        escape = max(int(np.ceil(percentile)) + 1, minimum)
+        rule = f"p{policy['negative_percentile']}={percentile:.1f}프레임 +1"
+        why = ""
+
     source = (f"손 모양 영상에서 라벨이 정답과 다른 구간(오검출 잡음)의 길이 "
-              f"p{policy['negative_percentile']}={percentile:.1f}프레임 +1, "
-              f"하한 {minimum} "
-              f"(구간 {array.size:.0f}개, 최대 {array.max():.0f}프레임). "
-              f"정상적인 손 모양 변경에 걸리는 시간은 파일럿 영상으로 잴 수 없어 "
-              f"근거에 넣지 못했다.")
-    if array.max() >= escape:
+              f"{rule}, 하한 {minimum} "
+              f"(구간 {array.size:.0f}개, p50={np.median(array):.0f}, "
+              f"p{policy['negative_percentile']}={percentile:.1f}, "
+              f"최대 {observed_max:.0f}프레임). "
+              + (why + " " if why else "")
+              + "정상적인 손 모양 변경에 걸리는 시간은 파일럿 영상으로 잴 수 없어 "
+                "근거에 넣지 못했다.")
+
+    if observed_max >= escape:
         warn(f"escape_frames={escape}인데 오검출 구간 최대치가 "
-             f"{array.max():.0f}프레임이다. 드물게 잡음만으로 관문이 열릴 수 있다.")
+             f"{observed_max:.0f}프레임이다. 드물게 잡음만으로 관문이 열릴 수 있다.")
     if array.size < 30:
         warn(f"escape_frames 근거 표본이 {array.size:.0f}개뿐이다. "
              "실사용 세션이 쌓이면 다시 재야 한다.")
