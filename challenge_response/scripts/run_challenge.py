@@ -31,9 +31,11 @@ from core.hand_action_detector import HandActionDetector  # noqa: E402
 from core.landmark_io import HERE, load_json, load_paths  # noqa: E402
 from core.movement_detector import MovementDetector  # noqa: E402
 import guide_overlay  # noqa: E402
+import korean_text  # noqa: E402
 
 WHITE, GREEN, RED, YELLOW, GREY = ((255, 255, 255), (80, 220, 120),
                                    (70, 70, 235), (60, 200, 240), (170, 170, 170))
+ORANGE = (60, 165, 245)
 FONT = cv2.FONT_HERSHEY_SIMPLEX
 # 동작 이름은 화면에 크게 띄워야 해서 한글 대신 기호로 표시한다 (OpenCV는 한글 미지원).
 ACTION_CAPTION = {
@@ -163,7 +165,13 @@ def draw_hud(frame, status, challenge, detected_shape, detected_move, config,
         colour = GREEN if ratio > 0.3 else RED
         cv2.rectangle(frame, (16, 66), (16 + int((w - 32) * ratio), 84), colour, -1)
 
-        if is_shape_action(status.current_action or ""):
+        if status.awaiting_escape:
+            # 관문이 닫혀 있는 동안은 제한 시간이 흐르지 않는다. 시간 막대를
+            # 회색으로 덮어 '아직 시작 전'임을 보인다.
+            cv2.rectangle(frame, (16, 66), (w - 16, 84), (80, 80, 80), -1)
+            escape_w = int((w - 32) * status.escape_progress)
+            cv2.rectangle(frame, (16, 66), (16 + escape_w, 84), ORANGE, -1)
+        elif is_shape_action(status.current_action or ""):
             hold_w = int((w - 32) * status.hold_progress)
             cv2.rectangle(frame, (16, 90), (16 + hold_w, 100), YELLOW, -1)
 
@@ -174,6 +182,16 @@ def draw_hud(frame, status, challenge, detected_shape, detected_move, config,
         guide_overlay.draw_guide(frame, status.current_action, config)
         if status.move_probe is not None:
             draw_move_debug(frame, status.move_probe, config)
+
+    if status.awaiting_escape and not status.finished:
+        # 안내 패널(오른쪽 위)과 겹치지 않게 그 아래에 놓는다.
+        korean_text.put_text_centred(
+            frame, "손을 한 번 바꿨다가 다시 해주세요", w // 2, h // 2 + 68,
+            size=26, colour=ORANGE, fallback="change your hand, then do it again")
+        korean_text.put_text_centred(
+            frame, f"직전 손 모양({status.escape_from})에서 벗어나야 시작됩니다",
+            w // 2, h // 2 + 104, size=16, colour=GREY,
+            fallback=f"leave {status.escape_from} first")
     guide_overlay.draw_next_actions(frame, challenge.actions,
                                     status.step_index, config)
     cv2.putText(frame, "  ".join(challenge.actions), (16, h - 10), FONT, 0.45, GREY, 1)

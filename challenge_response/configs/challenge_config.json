@@ -17,6 +17,8 @@
   "_source_shape_confidence_margin_deg": "펴짐/접힘 분포 틈 67.1도의 절반",
   "shape_confidence_min": null,
   "_source_shape_confidence_min": "정상 영상 정답 프레임 신뢰도 p5=0.811 / NEG 오검출 프레임 신뢰도 p95=0.897 (16프레임)",
+  "escape_frames": 10,
+  "_source_escape_frames": "손 모양 영상에서 라벨이 정답과 다른 구간(오검출 잡음)의 길이 p95=8.1프레임 +1, 하한 3 (구간 14개, 최대 12프레임). 정상적인 손 모양 변경에 걸리는 시간은 파일럿 영상으로 잴 수 없어 근거에 넣지 못했다.",
   "movement": {
     "window_ms": 500,
     "min_displacement_ratio": 0.169,
@@ -73,6 +75,8 @@
     "shape_confidence_min": "NEG 오검출 프레임의 신뢰도 p95=0.897가 정답 프레임 p5=0.811 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다."
   },
   "_warnings": [
+    "escape_frames=10인데 오검출 구간 최대치가 12프레임이다. 드물게 잡음만으로 관문이 열릴 수 있다.",
+    "escape_frames 근거 표본이 14개뿐이다. 실사용 세션이 쌓이면 다시 재야 한다.",
     "shape_confidence_min: NEG 오검출 프레임의 신뢰도 p95=0.897가 정답 프레임 p5=0.811 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다."
   ]
 }

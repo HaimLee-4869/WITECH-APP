@@ -56,5 +56,7 @@
     "move_strokes_required": 3,
     "shake_detections_max": 0,
     "diagonal_confirmed_max": 0.2
-  }
+  },
+  "escape_frames_min": 3,
+  "escape_frames_note": "단계 전환 시 이전 손 모양에서 '벗어났다'고 인정하는 연속 프레임 수. 손 모양을 유지하는 동안 발생하는 오검출 구간보다 길어야 잡음으로 관문이 열리지 않는다."
 }

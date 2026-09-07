@@ -13,7 +13,7 @@ from typing import Optional
 import numpy as np
 
 from .challenge_generator import Challenge
-from .challenge_state_machine import FailReason, State, Status
+from .challenge_state_machine import RULE_VERSION, FailReason, State, Status
 
 @dataclass
 class RunStats:
@@ -97,6 +97,8 @@ class RunStats:
 
 
 CSV_FIELDS = [
+    # 판정 규칙이 바뀌면 rule_version이 올라간다. 변경 전후를 갈라서 비교할 때 쓴다.
+    "rule_version", "escape_frames",
     "challenge_id", "participant", "started_at", "elapsed_ms", "result",
     "fail_reason", "action_1", "action_2", "action_3",
     "passed_1", "passed_2", "passed_3",
@@ -217,6 +219,8 @@ def append_result(csv_path: Path, recorder: SessionRecorder, status: Status,
 
     fail: Optional[FailReason] = status.fail_reason
     row = {
+        "rule_version": RULE_VERSION,
+        "escape_frames": (config or {}).get("escape_frames", ""),
         "challenge_id": recorder.challenge.challenge_id,
         "participant": recorder.participant,
         "started_at": recorder.started_at,

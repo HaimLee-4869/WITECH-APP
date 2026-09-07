@@ -31,6 +31,23 @@ def load_sessions(csv_path: Path, participant: str | None) -> pd.DataFrame:
     return sessions
 
 
+def report_versions(sessions: pd.DataFrame) -> None:
+    """규칙 버전별로 갈라서 본다. 변경 전후 비교가 이 표에서 시작된다."""
+    if "rule_version" not in sessions.columns:
+        print("[주의] rule_version 칼럼이 없는 옛 기록이다. 버전별 비교는 건너뛴다.")
+        return
+    print(chr(10) + "=" * 74)
+    print("규칙 버전별 결과")
+    print("=" * 74)
+    print(f"{'rule_version':<32}{'escape':>7}{'시도':>6}{'통과':>6}{'통과율':>8}")
+    for version, group in sessions.groupby(sessions["rule_version"].fillna("(없음)")):
+        passed = int((group["result"] == "PASS").sum())
+        escape = group["escape_frames"].dropna()
+        escape_text = f"{escape.iloc[0]:.0f}" if len(escape) else "-"
+        print(f"{str(version):<32}{escape_text:>7}{len(group):>6}{passed:>6}"
+              f"{passed / len(group) * 100:>7.1f}%")
+
+
 def report_outcomes(sessions: pd.DataFrame) -> None:
     total = len(sessions)
     passed = int((sessions["result"] == "PASS").sum())
@@ -221,6 +238,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=None, help="results.csv 경로")
     ap.add_argument("--participant", default=None)
+    ap.add_argument("--rule-version", default=None,
+                    help="특정 규칙 버전만 집계 (변경 전후 비교용)")
     args = ap.parse_args()
 
     paths = load_paths()
@@ -234,10 +253,13 @@ def main() -> int:
         return 1
 
     sessions = load_sessions(csv_path, args.participant)
+    if args.rule_version and "rule_version" in sessions.columns:
+        sessions = sessions[sessions["rule_version"] == args.rule_version]
     if sessions.empty:
         print("조건에 맞는 세션이 없다.", file=sys.stderr)
         return 1
 
+    report_versions(sessions)
     report_outcomes(sessions)
     moves = report_move_gates(sessions)
     if not moves.empty:

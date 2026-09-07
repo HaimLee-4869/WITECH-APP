@@ -24,6 +24,10 @@ from .hand_action_detector import UNKNOWN, HandActionDetector
 from .movement_detector import NONE, MovementDetector
 
 
+# 판정 규칙이 바뀌면 올린다. results.csv에 같이 적어 변경 전후를 비교한다.
+RULE_VERSION = "2026-09-08.escape-gate"
+
+
 class State(Enum):
     IDLE = "IDLE"
     WAIT_HAND = "WAIT_HAND"
@@ -165,6 +169,12 @@ class Status:
     fail_reason: Optional[FailReason] = None
     steps: list[StepResult] = field(default_factory=list)
     move_probe: Optional[MoveProbe] = None   # 이동 단계에서만 채워진다
+    escape_from: Optional[str] = None        # 벗어나야 하는 이전 손 모양
+    escape_progress: float = 1.0             # 0.0~1.0, 1.0이면 관문 열림
+
+    @property
+    def awaiting_escape(self) -> bool:
+        return self.escape_from is not None and self.escape_progress < 1.0
 
     @property
     def finished(self) -> bool:
@@ -192,6 +202,10 @@ class ChallengeStateMachine:
         self.min_detection_score = float(tracking["min_detection_score"])
 
         self.hold_frames = int(config["shape_hold_frames"])
+        # 이전 단계 종료 시점의 손 모양에서 벗어나야 다음 판정을 시작한다.
+        # None이면 관문을 끈다(도출 실패 시).
+        escape = config.get("escape_frames")
+        self.escape_frames = int(escape) if escape else 0
         # null이면 신뢰도 게이트를 끈다. 04에서 '신뢰도로는 더 못 거른다'가 측정으로
         # 확인된 경우이므로, 임의의 값을 넣는 대신 조건을 걸지 않는다.
         confidence_min = config.get("shape_confidence_min")
@@ -215,6 +229,9 @@ class ChallengeStateMachine:
         self._wrong_streak = 0
         # 제한 시간 동안 사용자가 '확실히' 수행한 다른 동작. 타임아웃 때 사유를 정한다.
         self._sustained_wrong: Optional[str] = None
+        self._last_shape: Optional[str] = None    # 마지막으로 검출된 손 모양
+        self._escape_from: Optional[str] = None   # 벗어나야 하는 모양
+        self._escape_streak = 0
         self._lost_streak = 0
         self._unstable_streak = 0
         self._retries_left = self.max_retries
@@ -297,6 +314,22 @@ class ChallengeStateMachine:
     def _update_shape(self, obs: Observation, action: str) -> Status:
         result = self.shape_detector.detect(obs.angle_coords)
         confident = result.confidence >= self.shape_confidence_min
+        self._last_shape = result.label
+
+        # --- 이전 손 모양 이탈 관문 ---
+        # 이동은 손바닥을 편 채로 하므로, 이동 다음 단계가 OPEN_PALM이면 손이 이미
+        # 그 모양이라 아무것도 안 해도 통과된다. 요청에 반응했는지를 확인하지
+        # 못하게 되므로 보안 문제다. 이전 모양에서 실제로 벗어난 뒤에 판정한다.
+        if self._escape_pending():
+            if result.label != self._escape_from:
+                self._escape_streak += 1
+            else:
+                self._escape_streak = 0
+            # 관문이 닫혀 있는 동안은 제한 시간을 소모하지 않는다.
+            self._step_started_ms = obs.timestamp_ms
+            if self._escape_pending():
+                return self._status(result.label, result.confidence)
+            self._escape_from = None
 
         if result.label == action and confident:
             self._wrong_label, self._wrong_streak = None, 0
@@ -327,6 +360,11 @@ class ChallengeStateMachine:
 
     def _update_move(self, obs: Observation, action: str) -> Status:
         from . import geometry as g
+
+        # 이동 중의 손 모양을 계속 기억해 둔다. 이동이 끝난 시점의 이 값이
+        # 다음 단계의 escape_from이 된다.
+        if obs.angle_coords is not None:
+            self._last_shape = self.shape_detector.detect(obs.angle_coords).label
 
         coords = obs.screen_coords
         self._centers.append(g.palm_center(coords))
@@ -370,6 +408,30 @@ class ChallengeStateMachine:
         return (FailReason.WRONG_SHAPE if is_shape_action(action)
                 else FailReason.WRONG_DIRECTION)
 
+    def _escape_pending(self) -> bool:
+        return (self._escape_from is not None
+                and self._escape_streak < self.escape_frames)
+
+    def _escape_progress(self) -> float:
+        if not self._escape_pending():
+            return 1.0
+        return min(self._escape_streak / max(self.escape_frames, 1), 1.0)
+
+    def _arm_escape_gate(self) -> None:
+        """다음 단계가 손 모양이면, 방금 끝난 시점의 손 모양에서 벗어나게 한다.
+
+        이동 단계에는 걸지 않는다. 이동은 단계 전환 때 윈도우를 비우므로 정지한
+        손으로는 변위가 나오지 않고, Challenge에 이동은 하나뿐이라 '이전 단계가
+        이미 이동을 만족시키는' 경우 자체가 생기지 않는다.
+        """
+        action = self.current_action
+        self._escape_streak = 0
+        if (self.escape_frames > 0 and action is not None
+                and is_shape_action(action) and self._last_shape is not None):
+            self._escape_from = self._last_shape
+        else:
+            self._escape_from = None
+
     def _future_actions(self) -> set[str]:
         return set(self.challenge.actions[self.step_index + 1:])
 
@@ -388,6 +450,7 @@ class ChallengeStateMachine:
             self.state = State.PASS
         else:
             self._step_started_ms = timestamp_ms
+            self._arm_escape_gate()
         return self._status()
 
     def _fail_step(self, reason: FailReason, timestamp_ms: float) -> Status:
@@ -434,4 +497,6 @@ class ChallengeStateMachine:
             fail_reason=self.fail_reason,
             steps=list(self.steps),
             move_probe=move_probe,
+            escape_from=self._escape_from if self._escape_pending() else None,
+            escape_progress=self._escape_progress(),
         )

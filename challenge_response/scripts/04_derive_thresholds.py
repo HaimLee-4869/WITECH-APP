@@ -200,6 +200,49 @@ def derive_confidence_min(frames: pd.DataFrame, labels: pd.Series, space: str,
     return round(threshold, 3), source
 
 
+def derive_escape_frames(frames: pd.DataFrame, labels: pd.Series,
+                         policy) -> tuple[int, str]:
+    """이전 손 모양에서 '벗어났다'고 인정할 연속 프레임 수.
+
+    단계가 바뀔 때 이전 동작의 손 모양이 그대로 다음 요청을 만족하면, 사용자가
+    아무것도 하지 않아도 통과된다. MOVE_*는 손바닥을 편 채로 수행하므로 이동
+    다음 단계가 OPEN_PALM이면 공짜로 넘어간다. 공격자도 손바닥 편 영상 하나로
+    그 단계를 통과할 수 있다는 뜻이라 UX가 아니라 보안 문제다.
+
+    그래서 이전 모양에서 벗어난 프레임을 일정 수 관측한 뒤에야 판정을 시작한다.
+    이 값이 너무 작으면 순간 오검출만으로 관문이 열려 방어가 무력해지므로,
+    **손 모양을 유지하는 동안 생기는 오검출 구간**보다 길어야 한다.
+    그 분포를 파일럿 영상에서 잰다.
+    """
+    work = frames.assign(label=labels)
+    noise_runs: list[int] = []
+    for stem, grp in work[work.action.isin(SHAPE_ACTIONS)].groupby("stem"):
+        grp = grp.sort_values("frame")
+        grp = grp[grp.label != "NO_HAND"]
+        noise_runs += run_lengths((grp.label != grp.action).to_numpy())
+
+    minimum = int(policy["escape_frames_min"])
+    if not noise_runs:
+        return minimum, "오검출 구간이 하나도 없어 하한값을 그대로 씀"
+
+    array = np.asarray(noise_runs, dtype=float)
+    percentile = float(np.percentile(array, policy["negative_percentile"]))
+    escape = max(int(np.ceil(percentile)) + 1, minimum)
+    source = (f"손 모양 영상에서 라벨이 정답과 다른 구간(오검출 잡음)의 길이 "
+              f"p{policy['negative_percentile']}={percentile:.1f}프레임 +1, "
+              f"하한 {minimum} "
+              f"(구간 {array.size:.0f}개, 최대 {array.max():.0f}프레임). "
+              f"정상적인 손 모양 변경에 걸리는 시간은 파일럿 영상으로 잴 수 없어 "
+              f"근거에 넣지 못했다.")
+    if array.max() >= escape:
+        warn(f"escape_frames={escape}인데 오검출 구간 최대치가 "
+             f"{array.max():.0f}프레임이다. 드물게 잡음만으로 관문이 열릴 수 있다.")
+    if array.size < 30:
+        warn(f"escape_frames 근거 표본이 {array.size:.0f}개뿐이다. "
+             "실사용 세션이 쌓이면 다시 재야 한다.")
+    return escape, source
+
+
 def derive_hold_frames(frames: pd.DataFrame, labels: pd.Series, policy) -> tuple[int, str]:
     """NEG 영상에서 잘못된 라벨이 연속으로 유지되는 최대 길이보다 길게 잡는다."""
     frames = frames.assign(label=labels)
@@ -574,6 +617,7 @@ def main() -> int:
 
     shape_targets = pd.DataFrame()
     hold_frames, hold_source = None, "임계값 미정으로 계산하지 못함"
+    escape_frames, escape_source = None, "임계값 미정으로 계산하지 못함"
     labels = None
     confidence_margin = None
     confidence_min, confidence_min_source = None, "임계값 미정으로 계산하지 못함"
@@ -583,6 +627,7 @@ def main() -> int:
         shape_targets.to_csv(report_dir / "shape_label_distribution.csv",
                              index=False, encoding="utf-8-sig")
         hold_frames, hold_source = derive_hold_frames(frames, labels, policy)
+        escape_frames, escape_source = derive_escape_frames(frames, labels, policy)
         confidence_margin = round(finger_detail["others"]["gap"] / 2.0, 1)
         confidence_min, confidence_min_source = derive_confidence_min(
             frames, labels, space, others_th, confidence_margin, policy)
@@ -626,6 +671,8 @@ def main() -> int:
             if "others" in fd else "도출 실패"),
         "shape_confidence_min": confidence_min,
         "_source_shape_confidence_min": confidence_min_source,
+        "escape_frames": escape_frames,
+        "_source_escape_frames": escape_source,
         "movement": movement,
         "timing": timing,
         "tracking": tracking,
@@ -651,6 +698,9 @@ def main() -> int:
         with pd.option_context("display.width", 200, "display.max_columns", 20):
             print(shape_targets[cols].to_string(
                 index=False, float_format=lambda v: f"{v * 100:6.1f}%"))
+
+    print(f"  신뢰도 하한 = {confidence_min}, "
+          f"이전 모양 이탈 = {escape_frames}프레임")
 
     print("\n=== 이동 임계값 ===")
     print(f"  window_ms              = {movement['window_ms']}")
