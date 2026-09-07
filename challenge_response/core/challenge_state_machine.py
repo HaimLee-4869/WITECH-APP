@@ -126,6 +126,8 @@ class ChallengeStateMachine:
         self._step_started_ms: Optional[float] = None
         self._now_ms: float = 0.0
         self._hold_streak = 0
+        self._wrong_label: Optional[str] = None
+        self._wrong_streak = 0
         self._lost_streak = 0
         self._unstable_streak = 0
         self._retries_left = self.max_retries
@@ -210,17 +212,29 @@ class ChallengeStateMachine:
         confident = result.confidence >= self.shape_confidence_min
 
         if result.label == action and confident:
+            self._wrong_label, self._wrong_streak = None, 0
             self._hold_streak += 1
             if self._hold_streak >= self.hold_frames:
                 return self._advance(obs.timestamp_ms)
             return self._status(result.label, result.confidence)
 
         self._hold_streak = 0
-        if confident and result.label != UNKNOWN:
-            if result.label in self._future_actions():
-                return self._fail(FailReason.WRONG_ORDER, obs.timestamp_ms)
-            return self._fail_step(FailReason.WRONG_SHAPE, obs.timestamp_ms)
-        return self._status(result.label, result.confidence)
+        if not confident or result.label == UNKNOWN:
+            self._wrong_label, self._wrong_streak = None, 0
+            return self._status(result.label, result.confidence)
+
+        # 틀린 모양도 유지 조건을 채워야 실패로 본다. 한 프레임 오검출로 세션을
+        # 끝내면, 측정상 최대 8프레임까지 나오는 순간 오검출에 정상 시도가 죽는다.
+        if result.label == self._wrong_label:
+            self._wrong_streak += 1
+        else:
+            self._wrong_label, self._wrong_streak = result.label, 1
+        if self._wrong_streak < self.hold_frames:
+            return self._status(result.label, result.confidence)
+
+        if result.label in self._future_actions():
+            return self._fail(FailReason.WRONG_ORDER, obs.timestamp_ms)
+        return self._fail_step(FailReason.WRONG_SHAPE, obs.timestamp_ms)
 
     def _update_move(self, obs: Observation, action: str) -> Status:
         from . import geometry as g
@@ -250,6 +264,7 @@ class ChallengeStateMachine:
         step.elapsed_ms = timestamp_ms - self._step_started_ms
         self.step_index += 1
         self._hold_streak = 0
+        self._wrong_label, self._wrong_streak = None, 0
         self._centers.clear()
         self._scales.clear()
         self._retries_left = self.max_retries
@@ -266,6 +281,7 @@ class ChallengeStateMachine:
             self.steps[self.step_index].retries_used += 1
             self._step_started_ms = timestamp_ms
             self._hold_streak = 0
+            self._wrong_label, self._wrong_streak = None, 0
             self._centers.clear()
             self._scales.clear()
             return self._status()

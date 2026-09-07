@@ -113,15 +113,36 @@ def test_hold_progress_is_reported():
 
 def test_wrong_shape_gives_wrong_shape():
     sm = build(["OPEN_PALM", "INDEX", "MOVE_RIGHT"])
-    status = feed_shape(sm, "FIST", 1)
+    status = feed_shape(sm, "FIST", CONFIG["shape_hold_frames"])
     assert status.state == State.FAIL
     assert status.fail_reason is FailReason.WRONG_SHAPE
+
+
+def test_brief_wrong_shape_blip_does_not_fail():
+    """오검출은 측정상 최대 8프레임까지 연속으로 나온다. 한 프레임에 죽으면 안 된다."""
+    sm = build(["OPEN_PALM", "INDEX", "MOVE_RIGHT"])
+    status = feed_shape(sm, "FIST", CONFIG["shape_hold_frames"] - 1)
+    assert status.state != State.FAIL
+    status = feed_shape(sm, "OPEN_PALM", CONFIG["shape_hold_frames"],
+                        CONFIG["shape_hold_frames"] * FRAME_MS)
+    assert sm.steps[0].passed
+
+
+def test_alternating_wrong_shapes_do_not_accumulate():
+    """서로 다른 오검출이 번갈아 나오는 건 '한 모양을 유지'한 게 아니다."""
+    sm = build(["OPEN_PALM", "MOVE_RIGHT", "MOVE_UP"])
+    for i in range(CONFIG["shape_hold_frames"] * 3):
+        label = "FIST" if i % 2 else "INDEX"
+        status = sm.update(obs(i * FRAME_MS, shape_hand(label)))
+        if status.finished:
+            break
+    assert status.fail_reason is not FailReason.WRONG_SHAPE
 
 
 def test_performing_a_later_action_first_gives_wrong_order():
     """3단계 동작을 1단계에서 하면 순서 위반이다."""
     sm = build(["OPEN_PALM", "MOVE_RIGHT", "FIST"])
-    status = feed_shape(sm, "FIST", 1)
+    status = feed_shape(sm, "FIST", CONFIG["shape_hold_frames"])
     assert status.state == State.FAIL
     assert status.fail_reason is FailReason.WRONG_ORDER
 
@@ -204,13 +225,13 @@ def test_low_detection_score_gives_tracking_unstable():
 
 def test_fail_reason_is_an_enum_not_a_string():
     sm = build(["OPEN_PALM", "INDEX", "MOVE_RIGHT"])
-    status = feed_shape(sm, "FIST", 1)
+    status = feed_shape(sm, "FIST", CONFIG["shape_hold_frames"])
     assert isinstance(status.fail_reason, FailReason)
 
 
 def test_failed_step_records_its_reason():
     sm = build(["OPEN_PALM", "INDEX", "MOVE_RIGHT"])
-    status = feed_shape(sm, "FIST", 1)
+    status = feed_shape(sm, "FIST", CONFIG["shape_hold_frames"])
     assert status.steps[0].fail_reason is FailReason.WRONG_SHAPE
     assert not status.steps[0].passed
 
@@ -221,18 +242,20 @@ def test_failed_step_records_its_reason():
 def test_retry_gives_the_step_another_chance():
     config = {**CONFIG, "timing": {**CONFIG["timing"], "max_retries": 1}}
     sm = build(["OPEN_PALM", "INDEX", "MOVE_RIGHT"], config)
-    status = feed_shape(sm, "FIST", 1)
+    hold = config["shape_hold_frames"]
+    status = feed_shape(sm, "FIST", hold)
     assert status.state != State.FAIL
     assert sm.steps[0].retries_used == 1
-    feed_shape(sm, "OPEN_PALM", config["shape_hold_frames"], FRAME_MS)
+    feed_shape(sm, "OPEN_PALM", hold, hold * FRAME_MS)
     assert sm.steps[0].passed
 
 
 def test_retries_run_out():
     config = {**CONFIG, "timing": {**CONFIG["timing"], "max_retries": 1}}
     sm = build(["OPEN_PALM", "INDEX", "MOVE_RIGHT"], config)
-    feed_shape(sm, "FIST", 1)
-    status = sm.update(obs(FRAME_MS, shape_hand("FIST")))
+    hold = config["shape_hold_frames"]
+    feed_shape(sm, "FIST", hold)
+    status = feed_shape(sm, "FIST", hold, hold * FRAME_MS)
     assert status.state == State.FAIL
     assert status.fail_reason is FailReason.WRONG_SHAPE
 
@@ -260,7 +283,7 @@ def test_starts_in_idle_and_moves_to_action():
 
 def test_finished_machine_ignores_further_frames():
     sm = build(["OPEN_PALM", "INDEX", "MOVE_RIGHT"])
-    feed_shape(sm, "FIST", 1)
+    feed_shape(sm, "FIST", CONFIG["shape_hold_frames"])
     before = sm.step_index
     status = sm.update(obs(999.0, shape_hand("OPEN_PALM")))
     assert status.state == State.FAIL
