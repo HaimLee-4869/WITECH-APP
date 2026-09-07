@@ -1,0 +1,78 @@
+{
+  "_generated_by": "scripts/04_derive_thresholds.py",
+  "_note": "모든 임계값은 촬영 영상의 실측 분포에서 나왔다. _source가 없는 값은 없다. null은 분포가 겹쳐 도출하지 못한 값이다.",
+  "angle_space": "image_iso",
+  "_source_angle_space": "extended/curled 분리폭 비교: image_iso=67.1도, world=45.5도",
+  "finger_extended_angle": {
+    "thumb": 145.2,
+    "others": 132.6,
+    "_source": {
+      "others": "OPEN_PALM/INDEX/TWO_FINGERS의 펴야 하는 손가락 p5=166.1도 / FIST 등 접어야 하는 손가락 p95=99.0도 (틈=67.1도)",
+      "thumb": "OPEN_PALM 엄지 p5=151.1도 / FIST 엄지 p95=139.3도 (틈=11.8도)"
+    }
+  },
+  "shape_hold_frames": 9,
+  "_source_shape_hold_frames": "NEG_threefingers, NEG_indexring, NEG_indexpinky 영상의 오검출 연속길이 p95=7.8프레임 +1, 하한 3 / 정상 영상 정답 연속길이 p5=15.5프레임 (제외: NEG_halffist)",
+  "shape_confidence_margin_deg": 33.5,
+  "_source_shape_confidence_margin_deg": "펴짐/접힘 분포 틈 67.1도의 절반",
+  "shape_confidence_min": null,
+  "_source_shape_confidence_min": "정상 영상 정답 프레임 신뢰도 p5=0.811 / NEG 오검출 프레임 신뢰도 p95=0.897 (16프레임)",
+  "movement": {
+    "window_ms": 500,
+    "min_displacement_ratio": 0.169,
+    "axis_dominance_ratio": 4.194,
+    "max_duration_ms": 2000,
+    "direction_map": {
+      "MOVE_LEFT": [
+        "x",
+        -1
+      ],
+      "MOVE_RIGHT": [
+        "x",
+        1
+      ],
+      "MOVE_UP": [
+        "y",
+        -1
+      ],
+      "MOVE_DOWN": [
+        "y",
+        1
+      ]
+    },
+    "_source": {
+      "window_ms": "MOVE 영상 획 1회 소요시간(주축 궤적의 평균선 교차 횟수로 측정) p5=524ms에 가장 가까운 격자값. 가장 빠른 획 안에 윈도우가 들어가야 한다.",
+      "min_displacement_ratio": "MOVE 영상별 p75 변위의 p5=0.280 / NEG_shake 윈도우 p95=0.057 (window=500ms, 진입·이탈 1윈도우 제외, 틈=0.223)",
+      "axis_dominance_ratio": "MOVE 획 구간 주축비 p5=5.34 / NEG_diagonal 획 구간 주축비 p95=3.05 (틈=2.30)",
+      "max_duration_ms": "획 1회 소요시간 p95=1915ms (16개 영상, 500ms 단위 올림)",
+      "direction_map": "각 영상의 첫 획 방향: MOVE_LEFT->x-1(4/4영상 일치), MOVE_RIGHT->x+1(4/4영상 일치), MOVE_UP->y-1(4/4영상 일치), MOVE_DOWN->y+1(4/4영상 일치)",
+      "excluded_clips": "제외한 영상 없음"
+    }
+  },
+  "timing": {
+    "per_action_timeout_ms": 2500,
+    "total_timeout_ms": 7500,
+    "max_retries": 1,
+    "_source": {
+      "per_action_timeout_ms": "손 모양 영상에서 9프레임 연속 정답까지 걸린 시간과 이동 획 1회 시간의 p95=2120ms (23건, 500ms 단위 올림)",
+      "total_timeout_ms": "per_action_timeout_ms × 단계 수 3",
+      "max_retries": "측정값 아님. 재시도 횟수는 분포에서 나오는 값이 아니라 프로토콜 정책이다. 측정값이 아님을 config _source에 명시한다."
+    }
+  },
+  "tracking": {
+    "max_lost_frames": 38,
+    "min_detection_score": 0.857,
+    "_source": {
+      "max_lost_frames": "정상 영상 중간 끊김 p95=9.1프레임 (3건) / NEG_exit 중간 끊김 p5=66.9프레임 (4건, 틈=57.8프레임)",
+      "min_detection_score": "정상 영상 검출 프레임 detection_score p5=0.857 (8216프레임)"
+    }
+  },
+  "coordinate_frame": "mirrored",
+  "_source_coordinate_frame": "측정값 아님. SPEC 4.5: 사용자가 화면을 보고 인식하는 방향으로 판정한다. 측정값이 아니라 UX 결정이다.",
+  "_unresolved": {
+    "shape_confidence_min": "NEG 오검출 프레임의 신뢰도 p95=0.897가 정답 프레임 p5=0.811 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다."
+  },
+  "_warnings": [
+    "shape_confidence_min: NEG 오검출 프레임의 신뢰도 p95=0.897가 정답 프레임 p5=0.811 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다."
+  ]
+}

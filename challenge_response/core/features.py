@@ -164,3 +164,90 @@ def percentile_summary(values: np.ndarray, percentiles=(5, 25, 50, 75, 95)) -> d
     for p in percentiles:
         out[f"p{p}"] = float(np.percentile(arr, p))
     return out
+
+
+def stable_span(valid: np.ndarray, trim_frames: int) -> tuple[int, int]:
+    """손이 안정적으로 잡혀 있는 구간 [start, stop).
+
+    영상 앞뒤에는 손이 화면으로 들어오고 나가는 동작이 들어 있다. 그건 제스처가
+    아니고, 실시간에서도 WAIT_HAND 이전·HAND_LOST 이후는 판정하지 않는다.
+    첫/마지막 검출에서 trim_frames만큼 잘라낸 구간을 돌려준다.
+    """
+    ok = np.asarray(valid, dtype=bool)
+    if not ok.any():
+        return 0, 0
+    first = int(np.argmax(ok))
+    last = len(ok) - 1 - int(np.argmax(ok[::-1]))
+    return first + trim_frames, last - trim_frames + 1
+
+
+def interior_gap_lengths(valid: np.ndarray) -> list[int]:
+    """첫 검출과 마지막 검출 '사이'의 미검출 구간 길이들.
+
+    앞뒤 미검출(손이 아직 안 들어왔거나 이미 나간 상태)은 세지 않는다.
+    """
+    ok = np.asarray(valid, dtype=bool)
+    if not ok.any():
+        return []
+    first = int(np.argmax(ok))
+    last = len(ok) - 1 - int(np.argmax(ok[::-1]))
+    gaps, current = [], 0
+    for value in ok[first:last + 1]:
+        if not value:
+            current += 1
+        elif current:
+            gaps.append(current)
+            current = 0
+    return gaps
+
+
+def primary_axis(centers: np.ndarray, scales: np.ndarray) -> tuple[int, float, float]:
+    """이동 범위가 큰 축과 (주축 범위, 축비)를 돌려준다. 손 크기로 정규화."""
+    pts = np.asarray(centers, dtype=np.float64)[:, :2]
+    ok = np.isfinite(pts[:, 0])
+    scale = float(np.nanmedian(scales))
+    if ok.sum() < 2 or not np.isfinite(scale) or scale <= 0:
+        return 0, float("nan"), float("nan")
+    norm = pts[ok] / scale
+    spans = norm.max(axis=0) - norm.min(axis=0)
+    axis = int(np.argmax(spans))
+    minor = max(float(spans[1 - axis]), _EPS)
+    return axis, float(spans[axis]), float(spans[axis] / minor)
+
+
+def first_stroke_sign(centers: np.ndarray, scales: np.ndarray, axis: int,
+                      fraction: float) -> int:
+    """정지 상태에서 처음 움직인 방향의 부호.
+
+    왕복 운동은 양방향이 같은 횟수로 나타나므로 슬라이딩 윈도우 다수결로는
+    좌/우를 가릴 수 없다. 촬영은 정지 상태에서 시작하므로 첫 획이 라벨 방향이다.
+    """
+    pts = np.asarray(centers, dtype=np.float64)[:, axis]
+    scale = float(np.nanmedian(scales))
+    ok = np.isfinite(pts)
+    if ok.sum() < 2 or not np.isfinite(scale) or scale <= 0:
+        return 0
+    track = pts[ok] / scale
+    offset = track - track[0]
+    span = float(track.max() - track.min())
+    threshold = fraction * span
+    hits = np.flatnonzero(np.abs(offset) >= threshold)
+    return int(np.sign(offset[hits[0]])) if hits.size else 0
+
+
+def stroke_duration_ms(centers: np.ndarray, scales: np.ndarray, axis: int,
+                       fps: float) -> float:
+    """획 1회 소요시간. 주축 궤적이 자기 평균선을 가로지른 횟수로 잰다.
+
+    진폭 임계값이 필요 없으므로 임계값 도출에 순환 참조가 생기지 않는다.
+    """
+    pts = np.asarray(centers, dtype=np.float64)[:, axis]
+    ok = np.isfinite(pts)
+    if ok.sum() < 3 or fps <= 0:
+        return float("nan")
+    track = pts[ok]
+    centered = track - track.mean()
+    crossings = int(np.sum(np.diff(np.sign(centered)) != 0))
+    if crossings == 0:
+        return float("nan")
+    return float(len(track) / fps * 1000.0 / crossings)

@@ -24,7 +24,8 @@ from core import features as F  # noqa: E402
 from core.geometry import FINGER_NAMES, NON_THUMB_FINGERS  # noqa: E402
 from core.hand_action_detector import SHAPE_PATTERNS, UNKNOWN  # noqa: E402
 from core.landmark_io import HERE, load_all_clips, load_json, load_paths, save_json  # noqa: E402
-from core.naming import MOVE_ACTIONS, SHAPE_ACTIONS  # noqa: E402
+from core.naming import (MOVE_ACTIONS, SHAPE_ACTIONS,  # noqa: E402
+                         SHAPE_NEG_ACTIONS)
 
 WARNINGS: list[str] = []
 UNRESOLVED: dict[str, str] = {}
@@ -38,6 +39,16 @@ def warn(message: str) -> None:
 def unresolved(key: str, message: str) -> None:
     UNRESOLVED[key] = message
     warn(f"{key}: {message}")
+
+
+def derivable_shape_negatives(policy) -> tuple[str, ...]:
+    """임계값 도출 근거로 쓸 손 모양 반례.
+
+    이미 '규칙으로 분리 불가'로 확정된 반례를 근거에 넣으면, 그 반례를 못 막는
+    대신 다른 임계값이 통째로 망가진다. 제외하고 미해결 항목으로 따로 보고한다.
+    """
+    excluded = set(policy.get("unresolvable_shape_negatives", []))
+    return tuple(a for a in SHAPE_NEG_ACTIONS if a not in excluded)
 
 
 def gap_threshold(positive_p5: float, negative_p95: float, margin_ratio: float):
@@ -160,7 +171,10 @@ def derive_confidence_min(frames: pd.DataFrame, labels: pd.Series, space: str,
 
     correct = detected[(detected.action.isin(SHAPE_ACTIONS)) &
                        (detected.label == detected.action)].confidence.to_numpy()
-    false_accept = detected[(detected.action.str.startswith("NEG_")) &
+    # NEG_shake / NEG_diagonal / NEG_exit은 손 모양이 정상(편 손)인 채로 움직이는
+    # 영상이라 OPEN_PALM 판정이 '오검출'이 아니다. 손 모양 반례만 넣는다.
+    usable_negatives = derivable_shape_negatives(policy)
+    false_accept = detected[(detected.action.isin(usable_negatives)) &
                             (detected.label.isin(SHAPE_PATTERNS))].confidence.to_numpy()
 
     if correct.size == 0:
@@ -168,9 +182,9 @@ def derive_confidence_min(frames: pd.DataFrame, labels: pd.Series, space: str,
         return None, "정답 프레임 없음"
     pos_p5 = float(np.percentile(correct, policy["positive_percentile"]))
     if false_accept.size == 0:
-        return round(pos_p5, 3), (f"정상 영상 정답 프레임 신뢰도 "
-                                  f"p{policy['positive_percentile']}={pos_p5:.3f} "
-                                  f"(NEG 오검출 프레임 0개라 상한 제약 없음)")
+        return round(pos_p5, 3), (
+            f"정상 영상 정답 프레임 신뢰도 p{policy['positive_percentile']}={pos_p5:.3f}, "
+            f"{', '.join(usable_negatives)}에서 오검출 프레임 0개라 상한 제약 없음")
 
     neg_p95 = float(np.percentile(false_accept, policy["negative_percentile"]))
     source = (f"정상 영상 정답 프레임 신뢰도 p{policy['positive_percentile']}={pos_p5:.3f} / "
@@ -190,7 +204,10 @@ def derive_hold_frames(frames: pd.DataFrame, labels: pd.Series, policy) -> tuple
     """NEG 영상에서 잘못된 라벨이 연속으로 유지되는 최대 길이보다 길게 잡는다."""
     frames = frames.assign(label=labels)
     false_runs: list[int] = []
-    for stem, grp in frames[frames.action.str.startswith("NEG_")].groupby("stem"):
+    # 손 모양 반례 영상에서만 센다. 이동 반례는 편 손을 유지한 채 움직이는
+    # 영상이라 OPEN_PALM이 오래 유지되는 게 정상이다.
+    for stem, grp in frames[frames.action.isin(
+            derivable_shape_negatives(policy))].groupby("stem"):
         grp = grp.sort_values("frame")
         false_runs += run_lengths(grp.label.isin(SHAPE_PATTERNS).to_numpy())
 
@@ -202,9 +219,11 @@ def derive_hold_frames(frames: pd.DataFrame, labels: pd.Series, policy) -> tuple
     neg_p = float(np.percentile(false_runs, policy["negative_percentile"])) if false_runs else 0.0
     hold = max(int(np.ceil(neg_p)) + 1, int(policy["hold_frames_min"]))
     pos_p5 = float(np.percentile(true_runs, policy["positive_percentile"])) if true_runs else 0.0
-    source = (f"NEG 영상 오검출 연속길이 p{policy['negative_percentile']}={neg_p:.1f}프레임 +1, "
+    source = (f"{', '.join(derivable_shape_negatives(policy))} 영상의 오검출 연속길이 "
+              f"p{policy['negative_percentile']}={neg_p:.1f}프레임 +1, "
               f"하한 {policy['hold_frames_min']} / "
-              f"정상 영상 정답 연속길이 p{policy['positive_percentile']}={pos_p5:.1f}프레임")
+              f"정상 영상 정답 연속길이 p{policy['positive_percentile']}={pos_p5:.1f}프레임 "
+              f"(제외: {', '.join(policy['unresolvable_shape_negatives']) or '없음'})")
     if pos_p5 < hold:
         warn(f"shape_hold_frames={hold}이 정상 영상의 정답 연속길이 p5={pos_p5:.1f}보다 길다. "
              "정상 사용자가 유지 조건을 못 채울 수 있다.")
@@ -214,170 +233,212 @@ def derive_hold_frames(frames: pd.DataFrame, labels: pd.Series, policy) -> tuple
 # ------------------------------------------------------------------ 이동
 
 
-def collect_window_table(clips, window_ms: float) -> pd.DataFrame:
-    rows = []
-    for clip in clips:
-        centers, scales = F.frame_palm_tracks(clip)
-        wf = int(round(window_ms / 1000.0 * clip.fps)) if clip.fps > 0 else 0
-        for m in F.sliding_window_motions(centers, scales, wf):
-            if m.valid:
-                rows.append({"stem": clip.meta.stem, "action": clip.meta.action,
-                             "condition": clip.meta.condition or "none",
+def clip_motion_profile(clip, window_ms: float, trim_windows: int) -> dict:
+    """영상 1개의 이동 특성. 앞뒤 진입/이탈 구간은 잘라낸다."""
+    centers, scales = F.frame_palm_tracks(clip)
+    wf = max(int(round(window_ms / 1000.0 * clip.fps)), 2) if clip.fps > 0 else 0
+    start, stop = F.stable_span(np.isfinite(scales), wf * trim_windows)
+    centers, scales = centers[start:stop], scales[start:stop]
+
+    axis, span, axis_ratio = F.primary_axis(centers, scales)
+    return {
+        "stem": clip.meta.stem, "action": clip.meta.action,
+        "condition": clip.meta.condition or "none",
+        "centers": centers, "scales": scales, "window_frames": wf, "fps": clip.fps,
+        "axis": axis, "span": span, "clip_axis_ratio": axis_ratio,
+        "motions": [m for m in F.sliding_window_motions(centers, scales, wf) if m.valid],
+    }
+
+
+def usable_move_clips(profiles):
+    """이동 임계값 도출에 쓸 수 있는 MOVE 영상을 고른다.
+
+    기준은 데이터에서 나온다: 일부러 대각선으로 찍은 NEG_diagonal 영상보다도
+    축 지배력이 낮은 MOVE 영상은 '한 축으로 움직인 촬영'이라고 볼 수 없다.
+    그런 영상까지 넣으면 축 임계값으로 대각선과 정상 이동을 가를 수 없게 된다.
+    """
+    diagonal = [p["clip_axis_ratio"] for p in profiles
+                if p["action"] == "NEG_diagonal" and np.isfinite(p["clip_axis_ratio"])]
+    ceiling = float(max(diagonal)) if diagonal else 0.0
+
+    usable, rejected = [], []
+    for p in profiles:
+        if p["action"] not in MOVE_ACTIONS:
+            continue
+        expected = "x" if p["action"] in ("MOVE_LEFT", "MOVE_RIGHT") else "y"
+        observed = "x" if p["axis"] == 0 else "y"
+        if p["clip_axis_ratio"] <= ceiling or observed != expected:
+            rejected.append({"stem": p["stem"], "axis_ratio": round(p["clip_axis_ratio"], 2),
+                             "observed_axis": observed, "expected_axis": expected})
+        else:
+            usable.append(p)
+    return usable, rejected, ceiling
+
+
+def derive_movement(clips, policy):
+    trim = int(policy["motion_edge_trim_windows"])
+    pos_pct, neg_pct = policy["positive_percentile"], policy["negative_percentile"]
+    within = policy["motion_positive_within_clip_percentile"]
+    margin = policy["separation_margin_ratio"]
+    grid = policy["motion_window_ms_grid"]
+
+    # 1) 획 1회 소요시간부터 잰다. 평균선 교차 횟수로 재므로 임계값이 필요 없다.
+    probe = [clip_motion_profile(c, float(np.median(grid)), trim) for c in clips]
+    usable, rejected, ceiling = usable_move_clips(probe)
+    if not usable:
+        unresolved("movement", "쓸 수 있는 MOVE 영상이 없다")
+        return {"_source": {}}, {"rejected": rejected}
+    for r in rejected:
+        warn(f"MOVE 영상 제외: {r['stem']} — 영상 축비 {r['axis_ratio']}"
+             f"(NEG_diagonal 최대 {ceiling:.2f} 이하), "
+             f"관측 주축 {r['observed_axis']} / 기대 {r['expected_axis']}")
+
+    durations = np.array([d for d in
+                          (F.stroke_duration_ms(p["centers"], p["scales"], p["axis"], p["fps"])
+                           for p in usable) if np.isfinite(d)])
+    if durations.size == 0:
+        unresolved("movement.window_ms", "획 소요시간을 재지 못했다")
+        return {"_source": {}}, {"rejected": rejected}
+
+    fastest = float(np.percentile(durations, policy["stroke_window_percentile"]))
+    slowest = float(np.percentile(durations, policy["stroke_timeout_percentile"]))
+    window_ms = float(min(grid, key=lambda w: abs(w - fastest)))
+    step = policy["timeout_round_ms"]
+    max_duration_ms = int(np.ceil(slowest / step) * step)
+
+    # 2) 정한 윈도우로 다시 훑는다.
+    profiles = [clip_motion_profile(c, window_ms, trim) for c in clips]
+    usable, rejected, ceiling = usable_move_clips(profiles)
+    usable_stems = {p["stem"] for p in usable}
+
+    def frame(pred):
+        rows = []
+        for p in profiles:
+            if not pred(p):
+                continue
+            for m in p["motions"]:
+                rows.append({"stem": p["stem"], "action": p["action"],
                              "displacement_ratio": m.displacement_ratio,
                              "axis_ratio": m.axis_ratio, "axis": m.axis, "sign": m.sign})
-    return pd.DataFrame(rows)
+        return pd.DataFrame(rows)
 
+    move = frame(lambda p: p["stem"] in usable_stems)
+    shake = frame(lambda p: p["action"] == "NEG_shake")
+    diagonal = frame(lambda p: p["action"] == "NEG_diagonal")
 
-def positive_move_pool(windows: pd.DataFrame, within_pct: float) -> np.ndarray:
-    """MOVE 영상별 '움직이는 중' 변위를 대표하는 값들.
-
-    한 영상에는 왕복 3회가 들어 있어 방향이 바뀌는 순간의 윈도우는 변위가 작다.
-    그래서 전체 윈도우의 p5가 아니라 영상 안에서의 상위 백분위를 쓴다.
-    """
-    move = windows[windows.action.isin(MOVE_ACTIONS)]
-    return np.array([np.percentile(g.displacement_ratio, within_pct)
-                     for _, g in move.groupby("stem")])
-
-
-def derive_movement(clips, policy) -> tuple[dict, dict]:
-    within = policy["motion_positive_within_clip_percentile"]
-    pos_pct, neg_pct = policy["positive_percentile"], policy["negative_percentile"]
-    margin = policy["separation_margin_ratio"]
-
-    # 1) 윈도우 길이: MOVE와 NEG_shake가 가장 크게 벌어지는 값을 고른다.
-    scan = []
-    cache: dict[float, pd.DataFrame] = {}
-    for window_ms in policy["motion_window_ms_grid"]:
-        windows = collect_window_table(clips, window_ms)
-        if windows.empty:
-            continue
-        cache[window_ms] = windows
-        pos = positive_move_pool(windows, within)
-        shake = windows.loc[windows.action == "NEG_shake", "displacement_ratio"].to_numpy()
-        if pos.size == 0 or shake.size == 0:
-            continue
-        p5, p95 = float(np.percentile(pos, pos_pct)), float(np.percentile(shake, neg_pct))
-        scan.append({"window_ms": window_ms, "move_p5": p5, "shake_p95": p95,
-                     "gap": p5 - p95})
-    if not scan:
-        raise RuntimeError("이동 윈도우를 하나도 만들지 못했다.")
-    scan_df = pd.DataFrame(scan)
-    best = scan_df.loc[scan_df.gap.idxmax()]
-    window_ms = float(best.window_ms)
-    windows = cache[window_ms]
-
-    detail = {"window_scan": scan_df.to_dict("records"),
-              "chosen_window_ms": window_ms,
-              "move_p5": float(best.move_p5), "shake_p95": float(best.shake_p95)}
-
-    # 2) min_displacement_ratio
-    min_disp, gap = gap_threshold(float(best.move_p5), float(best.shake_p95), margin)
-    disp_source = (f"MOVE_* 영상내 p{within} 변위의 p{pos_pct}={best.move_p5:.2f} / "
-                   f"NEG_shake 윈도우 p{neg_pct}={best.shake_p95:.2f} "
-                   f"(window={window_ms:.0f}ms, 틈={gap:.2f})")
+    # 3) min_displacement_ratio. 왕복 영상은 방향이 바뀌는 순간의 윈도우 변위가 작으므로
+    #    전체 p5가 아니라 '움직이는 중'을 대표하는 영상 내 상위 백분위를 쓴다.
+    per_clip = np.array([np.percentile(g.displacement_ratio, within)
+                         for _, g in move.groupby("stem")])
+    move_p5 = float(np.percentile(per_clip, pos_pct))
+    shake_p95 = float(np.percentile(shake.displacement_ratio, neg_pct))
+    min_disp, disp_gap = gap_threshold(move_p5, shake_p95, margin)
+    disp_source = (f"MOVE 영상별 p{within} 변위의 p{pos_pct}={move_p5:.3f} / "
+                   f"NEG_shake 윈도우 p{neg_pct}={shake_p95:.3f} "
+                   f"(window={window_ms:.0f}ms, 진입·이탈 {trim}윈도우 제외, "
+                   f"틈={disp_gap:.3f})")
     if min_disp is None:
         unresolved("movement.min_displacement_ratio",
-                   f"MOVE p{pos_pct}={best.move_p5:.2f}가 NEG_shake p{neg_pct}="
-                   f"{best.shake_p95:.2f}보다 작다(겹침 {-gap:.2f}). "
-                   "흔들기와 이동을 변위 크기만으로 가를 수 없다.")
+                   f"MOVE p{pos_pct}={move_p5:.3f}가 NEG_shake p{neg_pct}="
+                   f"{shake_p95:.3f}보다 작다(겹침 {-disp_gap:.3f}).")
 
-    # 3) axis_dominance_ratio — 변위 조건을 통과한 윈도우끼리 비교한다.
-    axis_source = "min_displacement_ratio가 정해지지 않아 계산하지 못함"
-    axis_ratio_th = None
-    axis_detail = {}
-    if min_disp is not None:
-        passing = windows[windows.displacement_ratio >= min_disp]
-        move_axis = passing.loc[passing.action.isin(MOVE_ACTIONS), "axis_ratio"]
-        diag_axis = passing.loc[passing.action == "NEG_diagonal", "axis_ratio"]
-        move_axis = move_axis.replace([np.inf], np.nan).dropna().to_numpy()
-        diag_axis = diag_axis.replace([np.inf], np.nan).dropna().to_numpy()
-        if move_axis.size and diag_axis.size:
-            mp5 = float(np.percentile(move_axis, pos_pct))
-            dp95 = float(np.percentile(diag_axis, neg_pct))
-            axis_detail = {"move_p5": mp5, "diagonal_p95": dp95,
-                           "move_n": int(move_axis.size), "diagonal_n": int(diag_axis.size)}
-            axis_ratio_th, agap = gap_threshold(mp5, dp95, margin)
-            axis_source = (f"MOVE_* 주축비 p{pos_pct}={mp5:.2f} / "
-                           f"NEG_diagonal 주축비 p{neg_pct}={dp95:.2f} (틈={agap:.2f})")
-            if axis_ratio_th is None:
-                unresolved("movement.axis_dominance_ratio",
-                           f"MOVE 주축비 p{pos_pct}={mp5:.2f}가 NEG_diagonal p{neg_pct}="
-                           f"{dp95:.2f}보다 낮다(겹침 {-agap:.2f}). 대각선을 가를 수 없다.")
-        else:
-            unresolved("movement.axis_dominance_ratio", "비교할 윈도우가 없다")
+    # 4) axis_dominance_ratio. 양쪽 다 '획 구간' 윈도우끼리 비교한다.
+    def stroke_axis_ratios(df):
+        pools = []
+        for _, g in df.groupby("stem"):
+            cut = np.percentile(g.displacement_ratio, within)
+            values = g.loc[g.displacement_ratio >= cut, "axis_ratio"]
+            pools.append(values.replace([np.inf, -np.inf], np.nan).dropna().to_numpy())
+        return np.concatenate(pools) if pools else np.array([])
 
-    # 4) 축→방향 대응표: 실제 영상에서 관측된 다수 축/부호를 쓴다 (추측하지 않음).
-    direction_map: dict[str, list] = {}
-    direction_detail: dict[str, dict] = {}
-    threshold_for_map = min_disp if min_disp is not None else 0.0
+    move_axis = stroke_axis_ratios(move)
+    diag_axis = stroke_axis_ratios(diagonal)
+    axis_th, axis_gap = None, float("nan")
+    axis_p5 = axis_p95 = None
+    if move_axis.size and diag_axis.size:
+        axis_p5 = float(np.percentile(move_axis, pos_pct))
+        axis_p95 = float(np.percentile(diag_axis, neg_pct))
+        axis_th, axis_gap = gap_threshold(axis_p5, axis_p95, margin)
+        axis_source = (f"MOVE 획 구간 주축비 p{pos_pct}={axis_p5:.2f} / "
+                       f"NEG_diagonal 획 구간 주축비 p{neg_pct}={axis_p95:.2f} "
+                       f"(틈={axis_gap:.2f})")
+        if axis_th is None:
+            unresolved("movement.axis_dominance_ratio",
+                       f"MOVE p{pos_pct}={axis_p5:.2f}가 NEG_diagonal p{neg_pct}="
+                       f"{axis_p95:.2f}보다 낮다(겹침 {-axis_gap:.2f}).")
+    else:
+        axis_source = "비교할 윈도우가 없다"
+        unresolved("movement.axis_dominance_ratio", axis_source)
+
+    # 5) 축→방향 대응표. 왕복 운동은 양방향이 같은 횟수로 나오므로 다수결로는
+    #    좌/우를 가릴 수 없다. 각 영상의 '첫 획' 방향을 모아 만장일치를 확인한다.
+    direction_map = {}
+    direction_detail = {}
     for action in MOVE_ACTIONS:
-        sub = windows[(windows.action == action) &
-                      (windows.displacement_ratio >= threshold_for_map)]
-        if axis_ratio_th is not None:
-            sub = sub[sub.axis_ratio >= axis_ratio_th]
-        if sub.empty:
-            unresolved(f"movement.direction_map.{action}", "조건을 통과한 윈도우가 없다")
+        votes = []
+        for p in usable:
+            if p["action"] != action:
+                continue
+            sign = F.first_stroke_sign(p["centers"], p["scales"], p["axis"],
+                                       policy["first_stroke_fraction"])
+            if sign:
+                votes.append((("x" if p["axis"] == 0 else "y"), sign))
+        if not votes:
+            unresolved(f"movement.direction_map.{action}",
+                       "쓸 수 있는 영상이 없어 방향을 정하지 못했다")
             continue
-        votes = Counter(zip(sub.axis, sub.sign))
-        (axis, sign), n = votes.most_common(1)[0]
-        share = n / len(sub)
+        (axis, sign), agree = Counter(votes).most_common(1)[0]
         direction_map[action] = [axis, int(sign)]
         direction_detail[action] = {"axis": axis, "sign": int(sign),
-                                    "share": round(share, 3), "windows": len(sub)}
-        if share < 0.5:
-            warn(f"{action}의 주축/부호 다수결 비율이 {share:.1%}밖에 안 된다. 방향이 불안정하다.")
+                                    "clips": len(votes), "agree": agree}
+        if agree < len(votes):
+            unresolved(f"movement.direction_map.{action}",
+                       f"영상 {len(votes)}개 중 {agree}개만 같은 방향을 가리킨다")
 
-    used = defaultdict(list)
+    collisions = defaultdict(list)
     for action, (axis, sign) in direction_map.items():
-        used[(axis, sign)].append(action)
-    for key, actions in used.items():
+        collisions[(axis, sign)].append(action)
+    for key, actions in collisions.items():
         if len(actions) > 1:
             unresolved("movement.direction_map",
                        f"{actions}가 같은 축/부호 {key}로 관측됐다. 서로 구분할 수 없다.")
 
-    # 5) 획 1회에 걸리는 시간 → max_duration_ms
-    stroke_source = "min_displacement_ratio 미정으로 계산하지 못함"
-    max_duration_ms = None
-    if min_disp is not None:
-        durations = []
-        for clip in clips:
-            if clip.meta.action not in MOVE_ACTIONS:
-                continue
-            centers, scales = F.frame_palm_tracks(clip)
-            axis_idx = 0 if direction_map.get(clip.meta.action, ["x"])[0] == "x" else 1
-            strokes = F.count_strokes(centers, axis_idx, scales, min_disp)
-            if strokes > 0 and clip.fps > 0:
-                durations.append(clip.num_frames / clip.fps * 1000.0 / strokes)
-        if durations:
-            p = float(np.percentile(durations, policy["timeout_percentile"]))
-            step = policy["timeout_round_ms"]
-            max_duration_ms = int(np.ceil(p / step) * step)
-            stroke_source = (f"MOVE_* 영상 획 1회 소요시간 "
-                             f"p{policy['timeout_percentile']}={p:.0f}ms "
-                             f"({len(durations)}개 영상, {step}ms 단위 올림)")
-        else:
-            unresolved("movement.max_duration_ms", "획을 하나도 검출하지 못했다")
+    excluded_note = (
+        f"NEG_diagonal 최대 축비 {ceiling:.2f} 이하이거나 기대 축과 다른 MOVE 영상 "
+        f"{len(rejected)}개 제외: "
+        + ", ".join(f"{r['stem']}(축비 {r['axis_ratio']}, 관측 {r['observed_axis']}축)"
+                    for r in rejected)) if rejected else "제외한 영상 없음"
 
     movement = {
         "window_ms": int(window_ms),
         "min_displacement_ratio": round(min_disp, 3) if min_disp is not None else None,
-        "axis_dominance_ratio": round(axis_ratio_th, 3) if axis_ratio_th is not None else None,
+        "axis_dominance_ratio": round(axis_th, 3) if axis_th is not None else None,
         "max_duration_ms": max_duration_ms,
         "direction_map": direction_map,
         "_source": {
-            "window_ms": (f"MOVE와 NEG_shake의 분리폭이 최대인 윈도우 "
-                          f"({policy['motion_window_ms_grid'][0]}~"
-                          f"{policy['motion_window_ms_grid'][-1]}ms 중 {window_ms:.0f}ms)"),
+            "window_ms": (f"MOVE 영상 획 1회 소요시간(주축 궤적의 평균선 교차 횟수로 측정) "
+                          f"p{policy['stroke_window_percentile']}={fastest:.0f}ms에 가장 "
+                          f"가까운 격자값. 가장 빠른 획 안에 윈도우가 들어가야 한다."),
             "min_displacement_ratio": disp_source,
             "axis_dominance_ratio": axis_source,
-            "max_duration_ms": stroke_source,
-            "direction_map": ("MOVE_* 영상에서 조건을 통과한 윈도우의 주축/부호 다수결: "
-                              + ", ".join(f"{a}→{d['axis']}{d['sign']:+d}({d['share']:.0%})"
-                                          for a, d in direction_detail.items())),
+            "max_duration_ms": (f"획 1회 소요시간 p{policy['stroke_timeout_percentile']}="
+                                f"{slowest:.0f}ms ({durations.size}개 영상, "
+                                f"{step}ms 단위 올림)"),
+            "direction_map": ("각 영상의 첫 획 방향: " + ", ".join(
+                f"{a}->{d['axis']}{d['sign']:+d}({d['agree']}/{d['clips']}영상 일치)"
+                for a, d in direction_detail.items())),
+            "excluded_clips": excluded_note,
         },
     }
-    detail["axis"] = axis_detail
-    detail["direction"] = direction_detail
+    detail = {
+        "rejected": rejected, "diagonal_ceiling": ceiling,
+        "stroke_ms": {"p5": float(np.percentile(durations, 5)),
+                      "p50": float(np.percentile(durations, 50)),
+                      "p95": float(np.percentile(durations, 95))},
+        "move_p5": move_p5, "shake_p95": shake_p95,
+        "axis": {"move_p5": axis_p5, "diagonal_p95": axis_p95},
+        "direction": direction_detail,
+    }
     return movement, detail
 
 
@@ -385,38 +446,56 @@ def derive_movement(clips, policy) -> tuple[dict, dict]:
 
 
 def derive_tracking(frames: pd.DataFrame, policy) -> tuple[dict, dict]:
-    pos = frames[~frames.action.str.startswith("NEG_")]
-    lost_runs: list[int] = []
-    for stem, grp in pos.groupby("stem"):
-        lost_runs += run_lengths(~grp.sort_values("frame").valid.to_numpy())
-    exit_runs: list[int] = []
+    """중간 끊김은 견디고, 손이 실제로 사라지는 건 잡아내는 지점.
+
+    영상 앞뒤의 미검출은 손이 아직 화면에 들어오지 않았거나 이미 나간 구간이다.
+    실시간에서는 WAIT_HAND / 종료가 담당하므로 max_lost_frames의 근거가 아니다.
+    첫 검출과 마지막 검출 '사이'의 끊김만 센다.
+    """
+    positive_gaps: list[int] = []
+    for stem, grp in frames[~frames.action.str.startswith("NEG_")].groupby("stem"):
+        positive_gaps += F.interior_gap_lengths(grp.sort_values("frame").valid.to_numpy())
+    exit_gaps: list[int] = []
     for stem, grp in frames[frames.action == "NEG_exit"].groupby("stem"):
-        exit_runs += run_lengths(~grp.sort_values("frame").valid.to_numpy())
+        exit_gaps += F.interior_gap_lengths(grp.sort_values("frame").valid.to_numpy())
 
-    p = (float(np.percentile(lost_runs, policy["lost_frames_percentile"]))
-         if lost_runs else 0.0)
-    max_lost = max(int(np.ceil(p)), 1)
-    exit_max = max(exit_runs) if exit_runs else 0
-    if exit_max <= max_lost:
-        warn(f"NEG_exit의 최대 연속 미검출 {exit_max}프레임이 max_lost_frames={max_lost} "
-             "이하다. 손이 사라지는 공격을 못 잡는다.")
+    pos_p95 = (float(np.percentile(positive_gaps, policy["negative_percentile"]))
+               if positive_gaps else 0.0)
+    exit_p5 = (float(np.percentile(exit_gaps, policy["positive_percentile"]))
+               if exit_gaps else float("inf"))
 
-    scores = pos.loc[pos.valid, "detection_score"].to_numpy()
-    min_score = float(np.percentile(scores, policy["positive_percentile"])) if scores.size else None
+    max_lost, gap = gap_threshold(exit_p5, pos_p95, policy["separation_margin_ratio"])
+    lost_source = (f"정상 영상 중간 끊김 p{policy['negative_percentile']}={pos_p95:.1f}프레임 "
+                   f"({len(positive_gaps)}건) / NEG_exit 중간 끊김 "
+                   f"p{policy['positive_percentile']}={exit_p5:.1f}프레임 "
+                   f"({len(exit_gaps)}건, 틈={gap:.1f}프레임)")
+    if max_lost is None:
+        unresolved("tracking.max_lost_frames",
+                   f"정상 영상 끊김 p{policy['negative_percentile']}={pos_p95:.1f}가 "
+                   f"NEG_exit 끊김 p{policy['positive_percentile']}={exit_p5:.1f} 이상이다. "
+                   "일시적 끊김과 손이 사라진 것을 가를 수 없다.")
+        max_lost_frames = None
+    else:
+        max_lost_frames = max(int(round(max_lost)), 1)
+
+    scores = frames.loc[~frames.action.str.startswith("NEG_") & frames.valid,
+                        "detection_score"].to_numpy()
+    min_score = (float(np.percentile(scores, policy["positive_percentile"]))
+                 if scores.size else None)
 
     tracking = {
-        "max_lost_frames": max_lost,
+        "max_lost_frames": max_lost_frames,
         "min_detection_score": round(min_score, 3) if min_score is not None else None,
         "_source": {
-            "max_lost_frames": (f"정상 영상 연속 미검출 길이 "
-                                f"p{policy['lost_frames_percentile']}={p:.1f}프레임 "
-                                f"/ NEG_exit 최대 연속 미검출 {exit_max}프레임"),
-            "min_detection_score": (f"정상 영상 검출 프레임 detection_score "
-                                    f"p{policy['positive_percentile']}={min_score:.3f}"
-                                    if min_score is not None else "데이터 없음"),
+            "max_lost_frames": lost_source,
+            "min_detection_score": (
+                f"정상 영상 검출 프레임 detection_score "
+                f"p{policy['positive_percentile']}={min_score:.3f} ({scores.size}프레임)"
+                if min_score is not None else "데이터 없음"),
         },
     }
-    return tracking, {"lost_p": p, "exit_max": exit_max}
+    return tracking, {"positive_p95": pos_p95, "exit_p5": exit_p5,
+                      "positive_gaps": len(positive_gaps), "exit_gaps": len(exit_gaps)}
 
 
 def derive_timing(frames: pd.DataFrame, labels: pd.Series, hold_frames: int,

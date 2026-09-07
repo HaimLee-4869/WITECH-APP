@@ -14,8 +14,17 @@ SHAPE_ACTIONS = ("OPEN_PALM", "FIST", "INDEX", "TWO_FINGERS")
 MOVE_ACTIONS = ("MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN")
 POSITIVE_ACTIONS = SHAPE_ACTIONS + MOVE_ACTIONS
 CONDITIONS = ("near", "far", "dark")
-NEG_KINDS = ("halffist", "threefingers", "indexring", "indexpinky",
-             "shake", "diagonal", "exit")
+# NEG 영상은 무엇에 대한 반례인지가 다르다. 섞어서 통계를 내면 안 된다.
+#   손 모양 반례: 손은 가만히 있고 모양만 애매하다
+#   이동 반례:   손 모양은 정상(편 손)이고 움직임만 애매하다
+#   추적 반례:   손이 화면에서 사라진다
+SHAPE_NEG_KINDS = ("halffist", "threefingers", "indexring", "indexpinky")
+MOVE_NEG_KINDS = ("shake", "diagonal")
+TRACKING_NEG_KINDS = ("exit",)
+NEG_KINDS = SHAPE_NEG_KINDS + MOVE_NEG_KINDS + TRACKING_NEG_KINDS
+
+SHAPE_NEG_ACTIONS = tuple(f"NEG_{k}" for k in SHAPE_NEG_KINDS)
+MOVE_NEG_ACTIONS = tuple(f"NEG_{k}" for k in MOVE_NEG_KINDS)
 
 _PARTICIPANT_RE = re.compile(r"^P\d{2}$")
 _INDEX_RE = re.compile(r"^\d+$")

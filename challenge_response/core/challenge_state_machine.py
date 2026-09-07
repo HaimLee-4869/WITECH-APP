@@ -107,7 +107,11 @@ class ChallengeStateMachine:
         self.min_detection_score = float(tracking["min_detection_score"])
 
         self.hold_frames = int(config["shape_hold_frames"])
-        self.shape_confidence_min = float(config["shape_confidence_min"])
+        # null이면 신뢰도 게이트를 끈다. 04에서 '신뢰도로는 더 못 거른다'가 측정으로
+        # 확인된 경우이므로, 임의의 값을 넣는 대신 조건을 걸지 않는다.
+        confidence_min = config.get("shape_confidence_min")
+        self.shape_confidence_min = (float(confidence_min)
+                                     if confidence_min is not None else 0.0)
 
         window = self.movement_detector.window_frames(self.fps)
         self._centers: deque = deque(maxlen=window)

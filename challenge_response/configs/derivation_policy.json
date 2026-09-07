@@ -38,5 +38,23 @@
   "max_retries": 1,
   "max_retries_note": "재시도 횟수는 분포에서 나오는 값이 아니라 프로토콜 정책이다. 측정값이 아님을 config _source에 명시한다.",
   "coordinate_frame": "mirrored",
-  "coordinate_frame_note": "SPEC 4.5: 사용자가 화면을 보고 인식하는 방향으로 판정한다. 측정값이 아니라 UX 결정이다."
+  "coordinate_frame_note": "SPEC 4.5: 사용자가 화면을 보고 인식하는 방향으로 판정한다. 측정값이 아니라 UX 결정이다.",
+  "motion_edge_trim_windows": 1,
+  "motion_edge_trim_note": "영상 앞뒤의 손 진입/이탈 동작은 제스처가 아니다. 실시간에서도 WAIT_HAND 이전과 HAND_LOST 이후는 판정하지 않으므로, 첫/마지막 검출에서 1윈도우씩 잘라내고 전 영상에 동일 적용한다.",
+  "stroke_window_percentile": 5,
+  "stroke_timeout_percentile": 95,
+  "first_stroke_fraction": 0.3,
+  "first_stroke_fraction_note": "첫 획 방향을 정할 때 전체 진폭의 몇 배를 넘어야 움직임으로 볼지. 방향(부호)만 정하는 데 쓰므로 임계값이 아니다.",
+  "unresolvable_shape_negatives": [
+    "NEG_halffist"
+  ],
+  "unresolvable_shape_negatives_note": "관절 각도 규칙으로 FIST와 분리되지 않는 것이 03 분포에서 확인된 경계 케이스. 이 영상을 다른 임계값(유지 프레임 수, 신뢰도 하한)의 근거에 넣으면 도출이 통째로 왜곡되므로 제외하고, 미해결 항목으로 따로 보고한다.",
+  "targets": {
+    "shape_correct_min": 0.9,
+    "halffist_false_accept_max": 0.05,
+    "twofingers_false_accept_max": 0.05,
+    "move_strokes_required": 3,
+    "shake_detections_max": 0,
+    "diagonal_confirmed_max": 0.2
+  }
 }
