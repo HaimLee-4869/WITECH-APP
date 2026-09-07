@@ -3,5 +3,13 @@
   "landmark_cache": "./data/landmarks",
   "session_out": "./data/sessions",
   "report_out": "./reports",
-  "mirror_flip": {}
+  "mirror_flip": {
+    "P01": false,
+    "P05": false
+  },
+  "mirror_flip_flicker_ratio": {
+    "P01": 0.0,
+    "P05": 0.0
+  },
+  "mirror_flip_source": "OPEN_PALM_near 영상 handedness 다수결 (오른손 촬영 가이드 기준, Left→반전 저장)"
 }
