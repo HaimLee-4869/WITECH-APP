@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -13,6 +14,87 @@ import numpy as np
 
 from .challenge_generator import Challenge
 from .challenge_state_machine import FailReason, State, Status
+
+@dataclass
+class RunStats:
+    """이번 실행에서 시도한 결과를 사유별로 모은다.
+
+    20회쯤 돌린 뒤 무엇이 문제인지 바로 보려는 용도다. 사유뿐 아니라 몇 단계에서
+    막혔는지도 같이 센다. 같은 WRONG_SHAPE라도 1단계에서 막히는 것과 3단계에서
+    막히는 것은 원인이 다르다.
+    """
+    attempts: int = 0
+    passes: int = 0
+    reasons: Counter = field(default_factory=Counter)
+    reason_steps: dict = field(default_factory=dict)
+    retries: int = 0
+    durations: list = field(default_factory=list)
+
+    @property
+    def failures(self) -> int:
+        return self.attempts - self.passes
+
+    @property
+    def pass_rate(self) -> float:
+        return self.passes / self.attempts if self.attempts else 0.0
+
+    @property
+    def median_ms(self) -> float:
+        if not self.durations:
+            return float("nan")
+        ordered = sorted(self.durations)
+        middle = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[middle]
+        return (ordered[middle - 1] + ordered[middle]) / 2.0
+
+    def record(self, status: Status, elapsed_ms: float) -> None:
+        self.attempts += 1
+        self.durations.append(float(elapsed_ms))
+        self.retries += sum(step.retries_used for step in status.steps)
+        if status.state is State.PASS:
+            self.passes += 1
+            return
+        reason = status.fail_reason
+        key = reason.value if reason else "UNKNOWN"
+        self.reasons[key] += 1
+        # 사람이 세는 단계 번호는 1부터
+        step_no = min(status.step_index + 1, len(status.steps)) if status.steps else 0
+        self.reason_steps.setdefault(key, Counter())[step_no] += 1
+
+    def ranked(self) -> list[tuple[str, int, Counter]]:
+        """많이 나온 사유부터 (사유, 횟수, 단계별 분포)."""
+        return [(key, count, self.reason_steps.get(key, Counter()))
+                for key, count in self.reasons.most_common()]
+
+    def headline(self) -> str:
+        return (f"이번 실행 {self.attempts}회 중 통과 {self.passes}회 "
+                f"({self.pass_rate * 100:.0f}%)")
+
+    def summary_lines(self, limit: int = 6) -> list[str]:
+        """화면에 띄울 짧은 요약 (영문/숫자만 — OpenCV가 한글을 못 그린다)."""
+        lines = [f"run: {self.passes}/{self.attempts} pass "
+                 f"({self.pass_rate * 100:.0f}%)"]
+        for key, count, steps in self.ranked()[:limit]:
+            spread = " ".join(f"s{step}:{n}" for step, n in sorted(steps.items()))
+            lines.append(f"{key:<18}{count:>3}  {spread}")
+        return lines
+
+    def console_report(self) -> str:
+        """콘솔에 출력할 표."""
+        rows = [self.headline()]
+        if self.attempts:
+            rows.append(f"  중앙 소요시간 {self.median_ms:.0f}ms, "
+                        f"재시도 사용 {self.retries}회")
+        if not self.reasons:
+            rows.append("  실패 없음")
+            return "\n".join(rows)
+        rows.append(f"  {'실패 사유':<20}{'횟수':>5}   단계별")
+        for key, count, steps in self.ranked():
+            spread = ", ".join(f"{step}단계 {n}회" for step, n in sorted(steps.items()))
+            rows.append(f"  {key:<20}{count:>5}   {spread}")
+        return "\n".join(rows)
+
 
 CSV_FIELDS = [
     "challenge_id", "participant", "started_at", "elapsed_ms", "result",

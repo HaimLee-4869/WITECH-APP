@@ -23,7 +23,8 @@ import _bootstrap  # noqa: F401
 from core import features as F  # noqa: E402
 from core import geometry as g  # noqa: E402
 from core.challenge_generator import generate_challenge, is_shape_action  # noqa: E402
-from core.challenge_logger import SessionRecorder, append_result  # noqa: E402
+from core.challenge_logger import (RunStats, SessionRecorder,  # noqa: E402
+                                   append_result)
 from core.challenge_state_machine import (ChallengeStateMachine,  # noqa: E402
                                           Observation, State)
 from core.hand_action_detector import HandActionDetector  # noqa: E402
@@ -54,7 +55,30 @@ def draw_landmarks(frame, landmarks, width, height) -> None:
         cv2.circle(frame, (x, y), 3, GREEN, -1)
 
 
-def draw_hud(frame, status, challenge, detected_shape, detected_move, config) -> None:
+def draw_stats(frame, stats) -> None:
+    """이번 실행의 사유별 통계. 결과 화면에서만 띄운다."""
+    if stats.attempts == 0:
+        return
+    lines = stats.summary_lines()
+    pad, line_h = 10, 19
+    box_w = 268
+    box_h = pad * 2 + line_h * len(lines)
+    x, y = 14, frame.shape[0] - box_h - 96
+
+    panel = frame[y:y + box_h, x:x + box_w]
+    if panel.shape[0] != box_h or panel.shape[1] != box_w:
+        return
+    cv2.addWeighted(panel, 0.2, np.full_like(panel, (30, 30, 30), np.uint8), 0.8, 0, panel)
+    cv2.rectangle(frame, (x, y), (x + box_w, y + box_h), (90, 90, 90), 1)
+
+    for i, text in enumerate(lines):
+        colour = WHITE if i == 0 else GREY
+        cv2.putText(frame, text, (x + pad, y + pad + line_h * (i + 1) - 6),
+                    FONT, 0.42, colour, 1, cv2.LINE_AA)
+
+
+def draw_hud(frame, status, challenge, detected_shape, detected_move, config,
+             stats=None) -> None:
     h, w = frame.shape[:2]
     cv2.rectangle(frame, (0, 0), (w, 132), (25, 25, 25), -1)
 
@@ -62,13 +86,18 @@ def draw_hud(frame, status, challenge, detected_shape, detected_move, config) ->
     cv2.putText(frame, f"{step}/{len(challenge.actions)}", (16, 44), FONT, 1.1, WHITE, 2)
 
     if status.state is State.PASS:
-        cv2.putText(frame, "PASS", (w // 2 - 90, h // 2), FONT, 3.0, GREEN, 6)
-    elif status.state is State.FAIL:
-        cv2.putText(frame, "FAIL", (w // 2 - 90, h // 2 - 30), FONT, 3.0, RED, 6)
-        reason = status.fail_reason.value if status.fail_reason else ""
-        cv2.putText(frame, reason, (w // 2 - 200, h // 2 + 30), FONT, 0.9, RED, 2)
-        cv2.putText(frame, "press r to retry", (w // 2 - 130, h // 2 + 70),
+        cv2.putText(frame, "PASS", (w // 2 - 90, h // 2 - 35), FONT, 3.0, GREEN, 6)
+        cv2.putText(frame, "press r for next", (w // 2 - 130, h // 2 + 12),
                     FONT, 0.7, GREY, 2)
+    elif status.state is State.FAIL:
+        # 아래쪽은 통계 패널이 쓰므로 결과 문구는 위로 올린다.
+        cv2.putText(frame, "FAIL", (w // 2 - 90, h // 2 - 35), FONT, 3.0, RED, 6)
+        reason = status.fail_reason.value if status.fail_reason else ""
+        cv2.putText(frame, reason, (w // 2 - 200, h // 2 - 2), FONT, 0.9, RED, 2)
+        cv2.putText(frame, "press r to retry", (w // 2 - 130, h // 2 + 22),
+                    FONT, 0.7, GREY, 2)
+    if status.finished and stats is not None:
+        draw_stats(frame, stats)
     else:
         caption = ACTION_CAPTION.get(status.current_action or "", "")
         cv2.putText(frame, caption, (110, 46), FONT, 1.2, YELLOW, 3)
@@ -100,7 +129,8 @@ def new_session(config, participant, session_dir, fps):
     recorder = SessionRecorder(challenge=challenge, participant=participant,
                                started_at=datetime.now(timezone.utc).isoformat(),
                                session_dir=session_dir)
-    print(f"\n새 Challenge {challenge.challenge_id}: {' -> '.join(challenge.actions)}")
+    print(f"\n새 Challenge {challenge.challenge_id}: "
+          f"{' -> '.join(challenge.actions)}", flush=True)
     return challenge, machine, recorder
 
 
@@ -136,7 +166,9 @@ def main() -> int:
     session_dir.mkdir(parents=True, exist_ok=True)
     csv_path = session_dir / "results.csv"
 
-    print("화면은 거울처럼 좌우가 뒤집혀 보인다. 화면에 보이는 방향으로 움직이면 된다.")
+    stats = RunStats()
+    print("화면은 거울처럼 좌우가 뒤집혀 보인다. 화면에 보이는 방향으로 움직이면 된다.",
+          flush=True)
     participant = args.participant
     challenge, machine, recorder = new_session(config, participant, session_dir, fps)
     writer = cv2.VideoWriter(str(recorder.video_path),
@@ -193,16 +225,19 @@ def main() -> int:
             display = cv2.flip(frame_bgr, 1)
             if landmarks is not None:
                 draw_landmarks(display, landmarks, width, height)
-            draw_hud(display, status, challenge, shape_label, move_label, config)
+            draw_hud(display, status, challenge, shape_label, move_label, config, stats)
             cv2.imshow("Challenge-Response", display)
 
             if status.finished and not saved:
                 writer.release()
                 recorder.save_landmarks(fps, width, height)
                 append_result(csv_path, recorder, status, now_ms)
-                print(f"결과: {status.state.name}"
+                stats.record(status, now_ms)
+                # 파이프로 실행해도 요약이 바로 보이도록 flush 한다.
+                print(f"\n결과: {status.state.name}"
                       f"{' / ' + status.fail_reason.value if status.fail_reason else ''}"
-                      f"  → {csv_path}")
+                      f"  ({now_ms:.0f}ms)", flush=True)
+                print(stats.console_report(), flush=True)
                 saved = True
 
             key = cv2.waitKey(1) & 0xFF
@@ -226,6 +261,12 @@ def main() -> int:
         writer.release()
     cap.release()
     cv2.destroyAllWindows()
+
+    print("\n" + "=" * 60, flush=True)
+    print("최종 요약", flush=True)
+    print("=" * 60, flush=True)
+    print(stats.console_report(), flush=True)
+    print(f"\n세션 기록: {csv_path}", flush=True)
     return 0
 
 

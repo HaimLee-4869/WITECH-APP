@@ -56,6 +56,26 @@ pytest                                          # 합성 랜드마크 기반 단
   판정 규칙이 어긋날 수 없고, `tests/test_guide_overlay.py`가 이를 검증한다.
 - 엄지는 판정에서 빼므로 안내 그림에서도 회색으로만 그린다.
 
+시도가 끝날 때마다 **이번 실행의 사유별 통계**를 화면(결과 화면 왼쪽)과 콘솔에
+같이 띄운다. 여러 번 돌린 뒤 무엇이 걸림돌인지 바로 보기 위한 것이다.
+
+```
+이번 실행 20회 중 통과 7회 (35%)
+  중앙 소요시간 2999ms, 재시도 사용 3회
+  실패 사유                  횟수   단계별
+  WRONG_SHAPE             7   1단계 5회, 3단계 2회
+  HAND_LOST               3   2단계 3회
+  ACTION_TIMEOUT          2   3단계 2회
+```
+
+사유뿐 아니라 **몇 단계에서 막혔는지**도 센다. 같은 `WRONG_SHAPE`라도 1단계에
+몰리면 사용자가 시작 자세를 잡을 시간이 부족한 것이고, 3단계에 몰리면 앞 단계에서
+시간을 다 쓴 것이라 원인이 다르다.
+
+통계는 **프로세스 단위**로 쌓인다. `q`로 끄면 초기화되므로, 한 세션에서 연속으로
+돌린 뒤 종료 시 나오는 최종 요약을 보면 된다. 개별 시도 기록은 계속
+`data/sessions/results.csv`에 누적되므로 나중에 다시 집계할 수 있다.
+
 ## 3. config 항목
 
 ### `configs/paths.json`
@@ -281,7 +301,9 @@ core/
   movement_detector.py      이동 방향 판정
   challenge_generator.py    secrets 기반 무작위 Challenge 생성
   challenge_state_machine.py 순서·시간 관리. UI 프레임워크 의존 없음
-  challenge_logger.py       세션 결과 저장
+scripts/
+  guide_overlay.py          요청 동작 안내 그림. 판정 규칙에서 직접 생성
+  challenge_logger.py       세션 결과 저장 + 실행 중 사유별 통계(RunStats)
 ```
 
 `challenge_state_machine.py`는 순수 파이썬이다(numpy 외 의존 없음). Flutter로
