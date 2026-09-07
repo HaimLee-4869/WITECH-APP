@@ -63,6 +63,14 @@ class HandActionDetector:
         flags, margins = g.extension_flags(angles, self.thumb_threshold, self.other_threshold)
 
         idx = [g.FINGER_NAMES.index(n) for n in g.NON_THUMB_FINGERS]
+
+        # 각도를 못 구한 손가락이 하나라도 있으면 판정하지 않는다.
+        # 이게 없으면 랜드마크가 전부 nan인 프레임의 flags가 모두 False가 되어
+        # FIST([F,F,F,F])로 오인된다.
+        if not all(np.isfinite(angles[i]) for i in idx):
+            return ShapeResult(UNKNOWN, 0.0, tuple(flags),
+                               tuple(float(a) for a in angles), tuple(margins))
+
         pattern = tuple(flags[i] for i in idx)
         label = next((name for name, p in SHAPE_PATTERNS.items() if p == pattern), UNKNOWN)
 

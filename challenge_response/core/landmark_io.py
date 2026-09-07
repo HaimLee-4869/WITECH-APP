@@ -70,6 +70,7 @@ class ClipLandmarks:
     width: int
     height: int
     duration_ms: float
+    rotation_meta: float
     mirrored: bool               # 정렬을 위해 x를 뒤집었는지
 
     @property
@@ -95,7 +96,15 @@ def extract_clip(video_path: Path, meta: ClipMeta, mp_settings: dict) -> dict:
     if not cap.isOpened():
         raise RuntimeError(f"영상을 열 수 없음: {video_path}")
 
+    # 촬영 영상은 컨테이너 회전 메타데이터를 갖고 있는데(P01=90도, P05=270도)
+    # OpenCV는 기본적으로 이를 적용하지 않는다. 끄고 읽으면 손이 옆으로 누운
+    # 프레임이 나와서 (1) MediaPipe 검출률이 떨어지고 (2) 상하/좌우 이동 축이
+    # 통째로 뒤바뀐다. 반드시 켠 채로 읽는다.
+    rotation_meta = float(cap.get(cv2.CAP_PROP_ORIENTATION_META))
+    cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
+
     fps = float(cap.get(cv2.CAP_PROP_FPS))
+    # 회전 적용 후의 실제 프레임 크기를 써야 한다. CAP_PROP_FRAME_*는 회전 전 값을 준다.
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -112,6 +121,7 @@ def extract_clip(video_path: Path, meta: ClipMeta, mp_settings: dict) -> dict:
             ok, frame_bgr = cap.read()
             if not ok:
                 break
+            height, width = frame_bgr.shape[:2]
             frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
             frame_rgb.flags.writeable = False
             result = hands.process(frame_rgb)
@@ -148,6 +158,7 @@ def extract_clip(video_path: Path, meta: ClipMeta, mp_settings: dict) -> dict:
         "width": np.int32(width),
         "height": np.int32(height),
         "duration_ms": np.float32(duration_ms),
+        "rotation_meta": np.float32(rotation_meta),
         "participant": meta.participant,
         "action": meta.action,
         "condition": meta.condition if meta.condition is not None else "",
@@ -190,6 +201,7 @@ def load_clip(path: str | Path, mirror_flip: dict[str, bool] | None = None) -> C
         width=int(data["width"]),
         height=int(data["height"]),
         duration_ms=float(data["duration_ms"]),
+        rotation_meta=float(data["rotation_meta"]) if "rotation_meta" in data else float("nan"),
         mirrored=mirrored,
     )
 

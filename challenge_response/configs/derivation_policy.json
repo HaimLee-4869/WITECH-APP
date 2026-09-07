@@ -33,5 +33,10 @@
     "image_iso",
     "world"
   ],
-  "histogram_bins": 40
+  "histogram_bins": 40,
+  "motion_positive_within_clip_percentile": 75,
+  "max_retries": 1,
+  "max_retries_note": "재시도 횟수는 분포에서 나오는 값이 아니라 프로토콜 정책이다. 측정값이 아님을 config _source에 명시한다.",
+  "coordinate_frame": "mirrored",
+  "coordinate_frame_note": "SPEC 4.5: 사용자가 화면을 보고 인식하는 방향으로 판정한다. 측정값이 아니라 UX 결정이다."
 }
