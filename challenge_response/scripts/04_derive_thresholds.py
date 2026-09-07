@@ -143,6 +143,49 @@ def evaluate_shape_targets(frames: pd.DataFrame, labels: pd.Series) -> pd.DataFr
     return pd.DataFrame(rows)
 
 
+def frame_confidences(frames: pd.DataFrame, space: str, other_th: float,
+                      margin_deg: float) -> np.ndarray:
+    """판정에 쓰는 4손가락 중 가장 아슬아슬한 손가락의 정규화 여유."""
+    stack = np.stack([frames[f"angle_{space}_{n}"].to_numpy() for n in NON_THUMB_FINGERS])
+    normalized = np.minimum(np.abs(stack - other_th) / margin_deg, 1.0)
+    return np.min(normalized, axis=0)
+
+
+def derive_confidence_min(frames: pd.DataFrame, labels: pd.Series, space: str,
+                          other_th: float, margin_deg: float, policy):
+    """정답 프레임은 통과시키고 NEG 오검출 프레임은 걸러내는 신뢰도 하한."""
+    conf = frame_confidences(frames, space, other_th, margin_deg)
+    work = frames.assign(label=labels, confidence=conf)
+    detected = work[work.label != "NO_HAND"]
+
+    correct = detected[(detected.action.isin(SHAPE_ACTIONS)) &
+                       (detected.label == detected.action)].confidence.to_numpy()
+    false_accept = detected[(detected.action.str.startswith("NEG_")) &
+                            (detected.label.isin(SHAPE_PATTERNS))].confidence.to_numpy()
+
+    if correct.size == 0:
+        unresolved("shape_confidence_min", "정답으로 판정된 프레임이 없다")
+        return None, "정답 프레임 없음"
+    pos_p5 = float(np.percentile(correct, policy["positive_percentile"]))
+    if false_accept.size == 0:
+        return round(pos_p5, 3), (f"정상 영상 정답 프레임 신뢰도 "
+                                  f"p{policy['positive_percentile']}={pos_p5:.3f} "
+                                  f"(NEG 오검출 프레임 0개라 상한 제약 없음)")
+
+    neg_p95 = float(np.percentile(false_accept, policy["negative_percentile"]))
+    source = (f"정상 영상 정답 프레임 신뢰도 p{policy['positive_percentile']}={pos_p5:.3f} / "
+              f"NEG 오검출 프레임 신뢰도 p{policy['negative_percentile']}={neg_p95:.3f} "
+              f"({false_accept.size}프레임)")
+    if neg_p95 >= pos_p5:
+        unresolved("shape_confidence_min",
+                   f"NEG 오검출 프레임의 신뢰도 p{policy['negative_percentile']}={neg_p95:.3f}가 "
+                   f"정답 프레임 p{policy['positive_percentile']}={pos_p5:.3f} 이상이다. "
+                   "신뢰도로 경계 케이스를 더 걸러낼 수 없다.")
+        return None, source
+    threshold, _ = gap_threshold(pos_p5, neg_p95, policy["separation_margin_ratio"])
+    return round(threshold, 3), source
+
+
 def derive_hold_frames(frames: pd.DataFrame, labels: pd.Series, policy) -> tuple[int, str]:
     """NEG 영상에서 잘못된 라벨이 연속으로 유지되는 최대 길이보다 길게 잡는다."""
     frames = frames.assign(label=labels)
@@ -454,6 +497,7 @@ def main() -> int:
     hold_frames, hold_source = None, "임계값 미정으로 계산하지 못함"
     labels = None
     confidence_margin = None
+    confidence_min, confidence_min_source = None, "임계값 미정으로 계산하지 못함"
     if others_th is not None:
         labels = label_frames(frames, space, thumb_th, others_th)
         shape_targets = evaluate_shape_targets(frames, labels)
@@ -461,6 +505,8 @@ def main() -> int:
                              index=False, encoding="utf-8-sig")
         hold_frames, hold_source = derive_hold_frames(frames, labels, policy)
         confidence_margin = round(finger_detail["others"]["gap"] / 2.0, 1)
+        confidence_min, confidence_min_source = derive_confidence_min(
+            frames, labels, space, others_th, confidence_margin, policy)
 
     movement, movement_detail = derive_movement(clips, policy)
     tracking, _ = derive_tracking(frames, policy)
@@ -499,6 +545,8 @@ def main() -> int:
         "_source_shape_confidence_margin_deg": (
             f"펴짐/접힘 분포 틈 {fd['others']['gap']:.1f}도의 절반"
             if "others" in fd else "도출 실패"),
+        "shape_confidence_min": confidence_min,
+        "_source_shape_confidence_min": confidence_min_source,
         "movement": movement,
         "timing": timing,
         "tracking": tracking,

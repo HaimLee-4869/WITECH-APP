@@ -25,6 +25,20 @@ import _bootstrap  # noqa: F401
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib import font_manager  # noqa: E402
+
+
+def _use_korean_font() -> None:
+    """리포트 라벨이 한글이라 한글 글꼴이 없으면 네모로 깨진다."""
+    available = {f.name for f in font_manager.fontManager.ttflist}
+    for name in ("Malgun Gothic", "NanumGothic", "AppleGothic", "Noto Sans CJK KR"):
+        if name in available:
+            plt.rcParams["font.family"] = name
+            break
+    plt.rcParams["axes.unicode_minus"] = False
+
+
+_use_korean_font()
 
 from core import features as F  # noqa: E402
 from core.geometry import FINGER_NAMES, NON_THUMB_FINGERS  # noqa: E402
