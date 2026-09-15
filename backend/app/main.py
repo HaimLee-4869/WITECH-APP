@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import Settings, get_settings
 from app.database import Database
+from app.migrations import upgrade_to_head
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -18,6 +19,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        if settings.auto_migrate:
+            upgrade_to_head(settings.database_url)
         app.state.db = Database(settings.database_url)
         yield
         app.state.db.dispose()
