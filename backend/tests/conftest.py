@@ -14,8 +14,11 @@ from app.main import create_app
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     """테스트마다 임시 SQLite 파일."""
+    # 셸 환경변수(USE_GESTURE_CLASSIFIER 등)와 무관하게 명세 기본값으로 고정
     return Settings(
         database_url=f"sqlite:///{(tmp_path / 'test.db').as_posix()}",
+        use_gesture_classifier=True,
+        auto_migrate=True,
         _env_file=None,
     )
 
