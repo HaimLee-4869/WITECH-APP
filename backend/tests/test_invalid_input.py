@@ -95,3 +95,26 @@ def test_schema_error_uses_same_shape(client):
 def test_reason_fallback_from_message(message, reason):
     """실제 ai_release 예외에 reason 속성이 없을 때 메시지로 추정."""
     assert reason_of(ValueError(message)) == reason
+
+
+@pytest.mark.parametrize("reason,frames,cam", CASES, ids=IDS)
+def test_verify_rejections_are_422_and_logged(client, make_user, reason, frames, cam):
+    from sqlalchemy import select
+
+    from app import models
+    from tests.payloads import verify_body
+
+    make_user()
+    body = verify_body()
+    body["frames"] = frames()
+    _apply_camera(body, cam)
+    res = post_json(client, "/verify", body)
+    assert res.status_code == 422, res.text
+    detail = res.json()["detail"]
+    assert detail == {"code": "invalid_sequence", "reason": reason, "message": REASON_MESSAGES[reason]}
+
+    with client.app.state.db.session() as s:
+        log = s.scalar(select(models.AuthLog))
+    assert log.passed is False
+    assert log.fail_reason == "invalid_input"
+    assert log.landmarks_json  # 거절된 입력도 원본을 남긴다

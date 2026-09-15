@@ -17,7 +17,7 @@ from app.config import Settings, get_settings
 from app.database import Database
 from app.errors import install_error_handlers
 from app.migrations import upgrade_to_head
-from app.routers import enroll
+from app.routers import enroll, verify
 from app.seed import ensure_seed_data
 
 log = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     install_error_handlers(app)
     app.include_router(enroll.router)
+    app.include_router(verify.router)
     return app
 
 
