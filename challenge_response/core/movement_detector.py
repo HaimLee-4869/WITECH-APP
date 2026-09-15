@@ -26,6 +26,8 @@ RAW = "raw"
 
 # 좌우가 뒤집혔을 때 서로 바뀌는 라벨 쌍. 상하는 거울에 영향받지 않는다.
 _LEFT_RIGHT = {"MOVE_LEFT": "MOVE_RIGHT", "MOVE_RIGHT": "MOVE_LEFT"}
+# 같은 축의 반대 방향. 상태 머신이 '반대 방향 먼저 확정 시 실패'에 쓴다 (README 5.10).
+OPPOSITE_DIRECTION = {**_LEFT_RIGHT, "MOVE_UP": "MOVE_DOWN", "MOVE_DOWN": "MOVE_UP"}
 
 
 @dataclass(frozen=True)

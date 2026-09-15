@@ -21,11 +21,11 @@ import numpy as np
 
 from .challenge_generator import Challenge, is_move_action, is_shape_action
 from .hand_action_detector import UNKNOWN, HandActionDetector
-from .movement_detector import NONE, MovementDetector
+from .movement_detector import NONE, OPPOSITE_DIRECTION, MovementDetector
 
 
 # 판정 규칙이 바뀌면 올린다. results.csv에 같이 적어 변경 전후를 비교한다.
-RULE_VERSION = "2026-09-16.time-based-frames"
+RULE_VERSION = "2026-09-16.opposite-first-fails"
 
 
 class State(Enum):
@@ -489,9 +489,15 @@ class ChallengeStateMachine:
 
         if result.label == action:
             return self._advance(obs.timestamp_ms)
+        if result.label == OPPOSITE_DIRECTION.get(action):
+            # 요청과 같은 축의 반대 방향이 먼저 확정되면 즉시 실패시킨다 (재시도는 허용).
+            # 그대로 두면 이동 영상 하나의 '되돌아오는 획'이 반대 방향 요청을 통과시킨다
+            # (정상 MOVE 파일럿 영상에 반대 방향 요청 시 80% 통과 -> 이 규칙으로 30%).
+            # 실시간 33개 이동 단계 중 반대 방향이 먼저 나온 3건은 모두 재시도로 회복됐다.
+            # 요청 방향이 먼저 잡히면 그 순간 통과하므로 그 뒤의 되돌아오는 획은 상관없다.
+            return self._fail_step(FailReason.WRONG_DIRECTION, obs.timestamp_ms)
         if result.label != NONE:
-            # 손 모양과 마찬가지로 즉시 실패시키지 않는다. 왕복 동작 중에는
-            # 반대 방향 획도 반드시 지나가기 때문이다.
+            # 수직 방향은 즉시 실패시키지 않고 제한 시간까지 기다린다. 사유만 기억한다.
             self._sustained_wrong = result.label
         return self._status(detected_move=result.label, move_probe=probe)
 

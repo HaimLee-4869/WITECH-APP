@@ -185,18 +185,52 @@ def test_wrong_direction_gives_wrong_direction():
     assert status.fail_reason is FailReason.WRONG_DIRECTION
 
 
-def test_wrong_direction_then_correct_still_passes():
-    """왕복 동작 중에는 반대 방향 획도 반드시 지나간다. 그걸로 죽으면 안 된다."""
-    sm = build(["MOVE_RIGHT", "OPEN_PALM", "FIST"])
+def _stroke(sm, dx, dy, start_ms, origin=(0.0, 0.0)):
+    """window 길이 동안 origin에서 (dx, dy)만큼 등속 이동. 마지막 status를 돌려준다."""
     window = sm.movement_detector.window_frames(FPS)
-    for i in range(window):
-        sm.update(obs(i * FRAME_MS, center=(-3.0 * i / (window - 1), 0.0, 0.0)))
-    assert sm.state != State.FAIL
-    start = window * FRAME_MS
     status = None
     for i in range(window):
-        status = sm.update(obs(start + i * FRAME_MS,
-                               center=(3.0 * i / (window - 1), 0.0, 0.0)))
+        f = i / (window - 1)
+        status = sm.update(obs(start_ms + i * FRAME_MS,
+                               center=(origin[0] + dx * f, origin[1] + dy * f, 0.0)))
+        if status.finished or sm.step_index > 0:
+            break
+    return status, start_ms + window * FRAME_MS
+
+
+def test_opposite_direction_first_fails_immediately():
+    """반대 방향이 요청 방향보다 먼저 확정되면 제한 시간을 기다리지 않고 실패한다 (README 5.10)."""
+    sm = build(["MOVE_RIGHT", "OPEN_PALM", "FIST"])        # max_retries 0
+    status, t = _stroke(sm, -3.0, 0.0, 0.0)
+    assert status.state == State.FAIL
+    assert status.fail_reason is FailReason.WRONG_DIRECTION
+    assert t < CONFIG["timing"]["per_action_timeout_ms"]
+
+
+def test_opposite_direction_first_uses_retry_then_correct_passes():
+    """재시도가 남아 있으면 반대 방향 실패 뒤 다시 기회를 준다."""
+    config = {**CONFIG, "timing": {**CONFIG["timing"], "max_retries": 1}}
+    sm = build(["MOVE_RIGHT", "OPEN_PALM", "FIST"], config)
+    status, t = _stroke(sm, -3.0, 0.0, 0.0)
+    assert sm.state != State.FAIL
+    assert sm.steps[0].retries_used == 1
+    status, _ = _stroke(sm, 3.0, 0.0, t, origin=(-3.0, 0.0))
+    assert sm.steps[0].passed
+
+
+def test_return_stroke_after_the_requested_direction_does_not_matter():
+    """요청 방향이 먼저 잡히면 그 순간 통과한다. 되돌아오는 획은 다음 단계 일이다."""
+    sm = build(["MOVE_RIGHT", "OPEN_PALM", "FIST"])
+    _, t = _stroke(sm, 3.0, 0.0, 0.0)
+    assert sm.steps[0].passed
+
+
+def test_perpendicular_direction_does_not_fail_immediately():
+    """수직 방향은 즉시 실패시키지 않는다. 그 뒤 요청 방향이 오면 통과한다."""
+    sm = build(["MOVE_RIGHT", "OPEN_PALM", "FIST"])
+    status, t = _stroke(sm, 0.0, -3.0, 0.0)
+    assert sm.state != State.FAIL
+    status, _ = _stroke(sm, 3.0, 0.0, t, origin=(0.0, -3.0))
     assert sm.steps[0].passed
 
 

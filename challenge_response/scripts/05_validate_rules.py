@@ -278,6 +278,21 @@ def main() -> int:
     results.append((f"NEG_diagonal 요청 1회 통과율 ({request_hits}/{request_pairs}쌍)",
                     f"{request_rate * 100:.1f}%", f"<= {request_limit * 100:.0f}%",
                     request_rate <= request_limit))
+    # 정상 MOVE 영상에 같은 축 반대 방향을 요청했을 때 통과율 (README 5.10). 되돌아오는 획
+    # 때문에 생기는 약점이라 목표는 없고 참고로 추적한다(passed=None).
+    opposite = {"MOVE_LEFT": "MOVE_RIGHT", "MOVE_RIGHT": "MOVE_LEFT",
+                "MOVE_UP": "MOVE_DOWN", "MOVE_DOWN": "MOVE_UP"}
+    opp_hits = opp_total = 0
+    for clip in clips:
+        if clip.meta.action not in MOVE_ACTIONS:
+            continue
+        passes = request_passes(raw_config, clip_observations(clip), clip.fps,
+                                directions=(opposite[clip.meta.action],))
+        opp_hits += sum(v is not None for v in passes.values())
+        opp_total += 1
+    if opp_total:
+        results.append((f"(참고) MOVE 영상에 반대 방향 요청 시 통과율 ({opp_hits}/{opp_total})",
+                        f"{opp_hits / opp_total * 100:.1f}%", "-", None))
     # 윈도우 비율은 '한 번만 걸리면 통과'를 반영하지 못해 참고로만 남긴다(passed=None).
     results.append(("(참고) NEG_diagonal 단일 방향 확정 윈도우 비율", f"{diagonal_share * 100:.1f}%",
                     f"< {targets['diagonal_confirmed_max'] * 100:.0f}%", None))
