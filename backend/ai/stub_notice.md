@@ -29,6 +29,6 @@
 ```
 
 `InvalidSequenceError`에 `reason` 속성이 없으면 백엔드는 메시지 문구로 사유 코드를
-추정한다. 추정이 틀리면 `ai_gateway.py`의 `_REASON_KEYWORDS`를 맞춘다.
+추정한다. 추정이 틀리면 `ai_gateway.py`의 `_REASON_PATTERNS`를 맞춘다.
 
 교체 절차는 `backend/README.md`의 "ai_release 교체 절차"를 따른다.
