@@ -56,7 +56,10 @@
     "move_one_way_correct_min": 1.0,
     "move_one_way_note": "2026-09-16 변경. 예전 목표 '왕복 3회 검출'은 파일럿 촬영 방식을 전제로 해서 실사용(정지 상태에서 편도 1회)과 맞지 않았다. 튕기는 방식 영상의 '정지 -> 한 방향 -> 제자리 정지'마다 처음 검출된 방향이 라벨과 같아야 한다. 전부(100%) 맞아야 달성.",
     "shake_detections_max": 0,
-    "diagonal_confirmed_max": 0.2
+    "diagonal_request_pass_basis": "chance",
+    "diagonal_request_pass_note": "2026-09-16 추가. 실제 인증은 요청 1회(단계 제한 x (1+재시도)) 안에 한 번만 걸리면 통과하므로 윈도우 비율로는 위협을 못 잡는다. NEG_diagonal 영상 x 요청 방향 쌍마다 실제 상태 머신으로 통과 여부를 재고, 통과한 쌍의 비율이 기준 이하여야 한다. basis=chance: 기준 = 1/(direction_map 방향 수). 대각선 반례가 한 방향을 무작위로 찍는 것보다 더 잘 통과하면 안 된다는 뜻이다. 측정값 아님(프로토콜에서 나온 기준). 숫자로 고정하려면 basis 대신 diagonal_request_pass_max를 둔다.",
+    "diagonal_confirmed_max": 0.2,
+    "diagonal_confirmed_note": "2026-09-16부터 참고용. 채점(달성 여부)에 넣지 않는다. 윈도우 비율 20% 미만이어도 요청 방향이 한 번 잡히면 뚫린다."
   },
   "escape_frames_min": 3,
   "escape_frames_note": "단계 전환 시 이전 손 모양에서 '벗어났다'고 인정하는 연속 프레임 수. 손 모양을 유지하는 동안 발생하는 오검출 구간보다 길어야 잡음으로 관문이 열리지 않는다.",

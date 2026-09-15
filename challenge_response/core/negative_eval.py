@@ -47,6 +47,12 @@ class NegativeResult:
     events: list[tuple[float, str]] = field(default_factory=list)  # 라벨이 새로 나온 순간
     tracking_end: Optional[str] = None      # HAND_LOST 등으로 판정이 끝났으면 사유
     tracking_end_ms: Optional[float] = None
+    # 요청 1회 기준: 방향 -> 통과까지 걸린 시간(ms) 또는 None. request_passes()로 채운다.
+    request_passes: Optional[dict] = None
+
+    @property
+    def request_pass_count(self) -> int:
+        return sum(v is not None for v in (self.request_passes or {}).values())
 
     @property
     def evaluated_windows(self) -> int:
@@ -73,7 +79,7 @@ class NegativeResult:
                 out[label] = t
         return out
 
-    def verdict(self, targets: dict) -> tuple[bool, str]:
+    def verdict(self, targets: dict, config: Optional[dict] = None) -> tuple[bool, str]:
         """(오검출 없음 여부, 설명). 목표는 derivation_policy.targets에서 온다."""
         accepted = [a.replace("MOVE_", "") for a, t in self.first_accept_ms().items() if t is not None]
         if self.kind == "shake":
@@ -82,11 +88,19 @@ class NegativeResult:
             return ok, (f"이동 인정 {len(self.events)}회 (목표 <= {limit})"
                         + (f", 인정된 방향 {'/'.join(accepted)}" if accepted else ""))
         if self.kind == "diagonal":
-            limit = float(targets["diagonal_confirmed_max"])
-            ok = self.confirmed_share < limit
-            return ok, (f"방향 확정 윈도우 {self.confirmed_windows}/{self.evaluated_windows} "
-                        f"({self.confirmed_share * 100:.1f}%, 목표 < {limit * 100:.0f}%)"
-                        + (f", 인정된 방향 {'/'.join(accepted)}" if accepted else ""))
+            reference = (f"참고: 방향 확정 윈도우 {self.confirmed_windows}/{self.evaluated_windows} "
+                         f"({self.confirmed_share * 100:.1f}%)")
+            if self.request_passes is None:
+                limit = float(targets["diagonal_confirmed_max"])
+                return self.confirmed_share < limit, reference + f" (요청 기준 미계산)"
+            limit = diagonal_request_target(targets, config)
+            total = len(self.request_passes)
+            rate = self.request_pass_count / total if total else 0.0
+            passed = [a.replace("MOVE_", "") for a, v in self.request_passes.items() if v is not None]
+            ok = rate <= limit
+            return ok, (f"요청 1회 통과 {self.request_pass_count}/{total}방향 ({rate * 100:.0f}%, "
+                        f"목표 <= {limit * 100:.0f}%)" + (f" {'/'.join(passed)}" if passed else "")
+                        + f"; {reference}")
         # exit: SPEC 목표는 없다. 손이 사라지기 전 움직임이 이동 단계를 통과시키는지 본다(README 5.9).
         ok = not self.events
         end = (f", 추적 종료 {self.tracking_end} @ {self.tracking_end_ms:.0f}ms"
@@ -158,8 +172,54 @@ def observations_from_npz(data) -> list[Observation]:
     return out
 
 
+def diagonal_request_target(targets: dict, config: Optional[dict]) -> float:
+    """NEG_diagonal 요청 1회 통과율 목표. basis=chance면 1/방향 수 (derivation_policy 참고)."""
+    if targets.get("diagonal_request_pass_basis") == "chance":
+        directions = (config or {}).get("movement", {}).get("direction_map") or MOVE_ACTIONS
+        return 1.0 / len(directions)
+    return float(targets["diagonal_request_pass_max"])
+
+
+def request_passes(config: dict, observations, fps: float,
+                   directions=MOVE_ACTIONS) -> dict[str, Optional[float]]:
+    """요청 1회 기준: 이 영상을 보여줬을 때 각 방향 요청이 통과되는가 (2026-09-16).
+
+    방향마다 그 이동 하나만 요청하는 Challenge를 만들어 **실제 제한 시간·재시도·추적 규칙
+    그대로** 상태 머신에 넣는다. 요청은 손이 처음 잡힌 순간 시작한다(실시간 WAIT_HAND 종료와
+    같다). 통과했으면 손이 잡힌 뒤 경과 시간, 아니면 None.
+
+    윈도우 비율(확정 윈도우 / 전체 윈도우)은 "한 번만 걸리면 통과"라는 인증 구조를 반영하지
+    못한다. 대각선 영상의 윈도우 비율이 20% 미만이어도 요청 방향이 한 번 잡히면 뚫린다.
+    """
+    observations = list(observations)
+    out: dict[str, Optional[float]] = {}
+    for direction in directions:
+        challenge = Challenge(challenge_id=f"request-{direction}", actions=[direction],
+                              created_at="probe")
+        machine = ChallengeStateMachine(config, challenge, HandActionDetector(config),
+                                        MovementDetector(config), fps)
+        passed_at = None
+        started = None
+        for obs in observations:
+            if machine.state is State.IDLE and not obs.hand_found:
+                continue                       # 손이 잡히기 전은 WAIT_HAND 이전과 같다
+            if started is None:
+                started = obs.timestamp_ms
+            status = machine.update(obs)
+            if status.state is State.PASS:
+                passed_at = obs.timestamp_ms - started
+                break
+            if status.finished:
+                break
+        out[direction] = passed_at
+    return out
+
+
 def evaluate_observations(config: dict, kind: str, observations, fps: float) -> NegativeResult:
+    observations = list(observations)
     probe = NegativeProbe(config, kind, fps)
     for obs in observations:
         probe.update(obs)
+    if kind == "diagonal":
+        probe.result.request_passes = request_passes(config, observations, fps)
     return probe.result

@@ -32,7 +32,7 @@ import _bootstrap  # noqa: F401
 from core import geometry as g  # noqa: E402
 from core.challenge_state_machine import RULE_VERSION, Observation  # noqa: E402
 from core.landmark_io import HERE, load_json  # noqa: E402
-from core.negative_eval import NEGATIVE_KINDS, NegativeProbe  # noqa: E402
+from core.negative_eval import NEGATIVE_KINDS, NegativeProbe, request_passes  # noqa: E402
 import guide_overlay  # noqa: E402
 import korean_text  # noqa: E402
 import run_challenge as RC  # noqa: E402
@@ -56,7 +56,9 @@ CSV_FIELDS = ["recorded_at", "rule_version", "participant", "kind", "take", "ste
               "duration_ms", "frames", "hand_frames", "windows", "confirmed_windows",
               "confirmed_share", "max_disp_ratio", "reference_disp_ratio", "events",
               "events_detail", "accept_LEFT_ms", "accept_RIGHT_ms", "accept_UP_ms",
-              "accept_DOWN_ms", "tracking_end", "tracking_end_ms", "no_false_accept",
+              "accept_DOWN_ms", "request_pass_LEFT_ms", "request_pass_RIGHT_ms",
+              "request_pass_UP_ms", "request_pass_DOWN_ms", "request_pass_count",
+              "tracking_end", "tracking_end_ms", "no_false_accept",
               "verdict", "video_path", "npz_path"]
 
 
@@ -208,7 +210,7 @@ def main() -> int:
     result_ok = True
 
     def reset_buffers():
-        return {"t": [], "lm": [], "valid": [], "score": [], "hand": []}
+        return {"t": [], "lm": [], "valid": [], "score": [], "hand": [], "obs": []}
 
     buf = reset_buffers()
 
@@ -251,6 +253,7 @@ def main() -> int:
                 else:
                     obs = Observation(t_ms, False)
                 status = probe.update(obs)
+                buf["obs"].append(obs)
                 buf["t"].append(t_ms)
                 buf["lm"].append(landmarks if landmarks is not None
                                  else np.full((21, 3), np.nan, np.float32))
@@ -270,7 +273,10 @@ def main() -> int:
                                      buf["valid"], buf["score"], buf["hand"], fps, width, height,
                                      reference)
                 r = probe.result
-                result_ok, verdict = r.verdict(targets)
+                if kind == "diagonal":
+                    # 실제 인증은 요청 1회 안에 한 번만 걸리면 통과한다. 방향마다 실제 규칙으로 잰다.
+                    r.request_passes = request_passes(config, buf["obs"], fps)
+                result_ok, verdict = r.verdict(targets, config)
                 accepts = r.first_accept_ms()
                 row = {
                     "recorded_at": datetime.now(timezone.utc).isoformat(),
@@ -286,6 +292,11 @@ def main() -> int:
                     "events_detail": "; ".join(f"{t:.0f}ms {lab}" for t, lab in r.events),
                     **{f"accept_{a.replace('MOVE_', '')}_ms": ("" if v is None else round(v))
                        for a, v in accepts.items()},
+                    **{f"request_pass_{a.replace('MOVE_', '')}_ms":
+                       ("" if not r.request_passes or r.request_passes.get(a) is None
+                        else round(r.request_passes[a]))
+                       for a in ("MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN")},
+                    "request_pass_count": r.request_pass_count if r.request_passes is not None else "",
                     "tracking_end": r.tracking_end or "",
                     "tracking_end_ms": round(r.tracking_end_ms) if r.tracking_end_ms else "",
                     "no_false_accept": int(result_ok), "verdict": verdict,

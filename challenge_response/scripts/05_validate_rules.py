@@ -24,7 +24,9 @@ from core import features as F  # noqa: E402
 from core.hand_action_detector import SHAPE_PATTERNS, UNKNOWN, HandActionDetector  # noqa: E402
 from core.landmark_io import HERE, load_all_clips, load_json, load_paths  # noqa: E402
 from core.movement_detector import NONE, MovementDetector  # noqa: E402
+from core.challenge_state_machine import Observation  # noqa: E402
 from core.naming import MOVE_ACTIONS, SHAPE_ACTIONS  # noqa: E402
+from core.negative_eval import diagonal_request_target, request_passes  # noqa: E402
 
 SHAPE_LABELS = list(SHAPE_PATTERNS) + [UNKNOWN, "NO_HAND"]
 MOVE_LABELS = list(MOVE_ACTIONS) + [NONE]
@@ -105,6 +107,20 @@ def evaluate_one_way(clip, events: list[dict], movement: MovementDetector,
     return {"style": "튕기는 방식", "one_way_trials": len(firsts),
             "one_way_correct": sum(f == clip.meta.action for f in firsts),
             "one_way_firsts": ", ".join(f.replace("MOVE_", "") for f in firsts)}
+
+
+def clip_observations(clip) -> list:
+    """캐시된 영상 전체를 실시간 입력처럼 Observation으로 (진입·이탈 구간도 그대로 둔다)."""
+    angle = F.angle_source(clip, "image_iso")
+    screen = F.screen_coords(clip)
+    out = []
+    for i in range(clip.num_frames):
+        t = i * 1000.0 / clip.fps
+        if clip.valid_mask[i]:
+            out.append(Observation(t, True, float(clip.detection_score[i]), angle[i], screen[i]))
+        else:
+            out.append(Observation(t, False))
+    return out
 
 
 def main() -> int:
@@ -243,23 +259,45 @@ def main() -> int:
                 total += 1
                 confirmed += result.label != NONE
         diagonal_share = confirmed / total if total else float("nan")
-    results.append(("NEG_diagonal 단일 방향 확정 비율", f"{diagonal_share * 100:.1f}%",
-                    f"< {targets['diagonal_confirmed_max'] * 100:.0f}%",
-                    diagonal_share < targets["diagonal_confirmed_max"]))
+    # 요청 1회 기준 (2026-09-16): 영상 x 요청 방향마다 실제 상태 머신(제한 시간·재시도 포함)으로
+    # 통과 여부를 잰다. 파일럿 캐시는 원본 좌표계라 raw로 판정한다. 채점은 이 항목으로 한다.
+    raw_config = {**config, "coordinate_frame": "raw"}
+    request_hits = request_pairs = 0
+    request_rows = []
+    for clip in diag_clips:
+        passes = request_passes(raw_config, clip_observations(clip), clip.fps)
+        request_hits += sum(v is not None for v in passes.values())
+        request_pairs += len(passes)
+        request_rows.append({"stem": clip.meta.stem,
+                             **{a: ("" if v is None else round(v)) for a, v in passes.items()}})
+    request_rate = request_hits / request_pairs if request_pairs else float("nan")
+    request_limit = diagonal_request_target(targets, config)
+    if request_rows:
+        pd.DataFrame(request_rows).to_csv(report_dir / "validate_diagonal_requests.csv",
+                                          index=False, encoding="utf-8-sig")
+    results.append((f"NEG_diagonal 요청 1회 통과율 ({request_hits}/{request_pairs}쌍)",
+                    f"{request_rate * 100:.1f}%", f"<= {request_limit * 100:.0f}%",
+                    request_rate <= request_limit))
+    # 윈도우 비율은 '한 번만 걸리면 통과'를 반영하지 못해 참고로만 남긴다(passed=None).
+    results.append(("(참고) NEG_diagonal 단일 방향 확정 윈도우 비율", f"{diagonal_share * 100:.1f}%",
+                    f"< {targets['diagonal_confirmed_max'] * 100:.0f}%", None))
 
     print()
     print("=" * 78)
     print("SPEC 4.11 목표 대비")
     print("=" * 78)
     width = max(len(r[0]) for r in results)
-    for name, value, target, passed in results:
-        print(f"  {name:<{width}}  {value:>10}  (목표 {target:>7})  "
-              f"{'달성' if passed else '미달'}")
+    def mark(passed):
+        return "참고" if passed is None else ("달성" if passed else "미달")
 
-    summary = pd.DataFrame(results, columns=["항목", "측정값", "목표", "달성"])
+    for name, value, target, passed in results:
+        print(f"  {name:<{width}}  {value:>10}  (목표 {target:>7})  {mark(passed)}")
+
+    summary = pd.DataFrame([(n, v, t, mark(p)) for n, v, t, p in results],
+                           columns=["항목", "측정값", "목표", "달성"])
     summary.to_csv(report_dir / "validate_targets.csv", index=False, encoding="utf-8-sig")
 
-    failed = [r[0] for r in results if not r[3]]
+    failed = [r[0] for r in results if r[3] is False]
     if failed:
         print(f"\n미달 항목 {len(failed)}개: {', '.join(failed)}", file=sys.stderr)
     print(f"\n리포트: {report_dir}")
