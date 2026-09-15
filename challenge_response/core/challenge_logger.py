@@ -207,6 +207,79 @@ def _fmt(value: float) -> str:
     return f"{value:.4f}"
 
 
+# ---------------------------------------------------------------- 실행 로그 (텍스트)
+
+def threshold_report_lines(config: dict, shape_detector, movement_detector,
+                           machine) -> list[str]:
+    """지금 **실제로 적용된** 임계값. config 파일이 아니라 판정기 객체에서 읽는다.
+
+    config를 고쳤는데 판정기가 옛 값을 쓰는 사고를 실행 시작 때 바로 잡으려는 것이다.
+    """
+    move = config.get("movement", {})
+    gate = shape_detector.fist_max_tip_wrist_ratio
+    lines = [
+        f"rule_version            {RULE_VERSION}",
+        f"timing                  단계 {machine.per_action_timeout_ms:.0f}ms / "
+        f"전체 {machine.total_timeout_ms:.0f}ms / 재시도 {machine.max_retries}회",
+        f"shape                   others {shape_detector.other_threshold:.1f}° / "
+        f"thumb {shape_detector.thumb_threshold:.1f}° ({shape_detector.angle_space})",
+        f"fist_max_tip_wrist      {'꺼짐(null)' if gate is None else f'{gate:.3f}'}",
+        f"frame_reference_fps     {machine.reference_fps:.2f} "
+        f"(프레임 수 값은 이 fps 기준 시간으로 판정)",
+        f"shape_hold_frames       {machine.hold_frames} = 첫~끝 {machine._hold.required_ms:.0f}ms 이상",
+        f"escape_frames           {machine.escape_frames} = 첫~끝 {machine._escape.required_ms:.0f}ms 이상",
+        f"shape_confidence_min    {machine.shape_confidence_min:.3f}"
+        f"{' (null -> 게이트 없음)' if config.get('shape_confidence_min') is None else ''}",
+        f"move window             {movement_detector.window_ms:.0f}ms "
+        f"(기준 {machine._window.window_frames}프레임, 첫~끝 {machine._window.required_ms:.0f}ms 이상이면 판정)",
+        f"move min_displacement   {movement_detector.min_displacement_ratio:.3f}",
+        f"move axis_dominance     {movement_detector.axis_dominance_ratio:.3f}",
+        f"move direction_map      {move.get('direction_map')}",
+        f"coordinate_frame        {movement_detector.coordinate_frame}",
+        f"tracking                max_lost {machine.max_lost_frames}프레임"
+        f"(연속 {machine._lost.required_ms:.0f}ms 넘으면 실패) / "
+        f"min_score {machine.min_detection_score:.3f}",
+    ]
+    unresolved = config.get("_unresolved") or {}
+    if unresolved:
+        lines.append(f"_unresolved             {', '.join(unresolved)}")
+    return lines
+
+
+def attempt_report_lines(recorder: SessionRecorder, status: Status,
+                         elapsed_ms: float, attempt_no: int) -> list[str]:
+    """시도 1회의 상세 기록. 콘솔에는 요약만 띄우고 이 내용은 파일에 남긴다."""
+    result = "PASS" if status.state is State.PASS else "FAIL"
+    reason = status.fail_reason.value if status.fail_reason else "-"
+    lines = [
+        f"[시도 {attempt_no}] {result}  사유={reason}  총 {elapsed_ms:.0f}ms  "
+        f"challenge={recorder.challenge.challenge_id}  참가자={recorder.participant}",
+        f"  요청 동작: {' -> '.join(recorder.challenge.actions)}",
+        f"  프레임 {len(recorder.valid)} / 손 검출 {int(sum(recorder.valid))}",
+    ]
+    for index, step in enumerate(status.steps, start=1):
+        reached = index - 1 <= status.step_index
+        if step.passed:
+            outcome = "통과"
+        elif step.fail_reason is not None:
+            outcome = f"실패({step.fail_reason.value})"
+        else:
+            outcome = "미도달" if not reached else "진행 중 종료"
+        lines.append(f"  {index}단계 {step.action:<12} {outcome:<22} "
+                     f"{step.elapsed_ms:7.0f}ms  재시도 {step.retries_used}")
+        if step.move is not None:
+            m = step.move
+            lines.append(
+                f"      이동 진단: 윈도우 {m.windows}, 변위 관문 통과 {m.displacement_pass}, "
+                f"축비 관문 통과 {m.axis_pass}, 주축 {m.dominant_axis or '-'}")
+            lines.append(
+                f"      변위비 최대 {_fmt(m.max_displacement_ratio) or '-'} / "
+                f"중앙 {_fmt(m.median_displacement_ratio) or '-'}   "
+                f"축비 최대 {_fmt(m.max_axis_ratio) or '-'} / "
+                f"중앙 {_fmt(m.median_axis_ratio) or '-'}")
+    return lines
+
+
 def append_result(csv_path: Path, recorder: SessionRecorder, status: Status,
                   elapsed_ms: float, config: Optional[dict] = None) -> None:
     """결과 CSV에 한 줄 추가한다. 파일이 없으면 헤더부터 쓴다."""

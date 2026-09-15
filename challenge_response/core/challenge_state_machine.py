@@ -25,7 +25,7 @@ from .movement_detector import NONE, MovementDetector
 
 
 # 판정 규칙이 바뀌면 올린다. results.csv에 같이 적어 변경 전후를 비교한다.
-RULE_VERSION = "2026-09-08.escape-gate"
+RULE_VERSION = "2026-09-16.time-based-frames"
 
 
 class State(Enum):
@@ -52,6 +52,94 @@ RETRYABLE = frozenset({FailReason.WRONG_SHAPE, FailReason.WRONG_DIRECTION,
                        FailReason.ACTION_TIMEOUT})
 
 
+class FrameSpan:
+    """'N프레임 연속'을 프레임 수가 아니라 관측 시각으로 잰다.
+
+    config의 프레임 수(shape_hold_frames 등)는 파일럿 영상(frame_reference_fps)에서 센
+    값이다. 실시간 fps가 다르면 같은 프레임 수가 다른 시간이 된다(웹캠 20fps에서 7프레임은
+    233ms가 아니라 350ms). 도출과 같은 기준이 되도록 기준 fps에서의 시간으로 비교한다.
+
+    N프레임 연속 = 첫 프레임과 지금 프레임의 간격이 (N-1)프레임 간격 이상.
+    타임스탬프 흔들림에 대비해 반 프레임 여유를 둔다. 기준 fps로 들어오면 프레임 수로
+    센 것과 결과가 같다.
+    """
+
+    def __init__(self, frames: int, reference_fps: float):
+        self.frames = int(frames)
+        frame_ms = 1000.0 / float(reference_fps)
+        self.required_ms = max(self.frames - 1.5, 0.0) * frame_ms
+        self.start_ms: Optional[float] = None
+        self.last_ms: Optional[float] = None
+
+    def hit(self, timestamp_ms: float) -> bool:
+        """조건을 만족한 프레임 하나. 연속 구간이 요구 길이에 닿았으면 True."""
+        if self.start_ms is None:
+            self.start_ms = timestamp_ms
+        self.last_ms = timestamp_ms
+        return self.done
+
+    def reset(self) -> None:
+        self.start_ms = self.last_ms = None
+
+    @property
+    def active(self) -> bool:
+        return self.start_ms is not None
+
+    @property
+    def elapsed_ms(self) -> float:
+        return 0.0 if self.start_ms is None else self.last_ms - self.start_ms
+
+    @property
+    def done(self) -> bool:
+        return self.frames > 0 and self.active and self.elapsed_ms >= self.required_ms
+
+    @property
+    def progress(self) -> float:
+        if not self.active:
+            return 0.0
+        if self.required_ms <= 0:
+            return 1.0
+        return min(self.elapsed_ms / self.required_ms, 1.0)
+
+
+class TimeWindow:
+    """이동 판정 윈도우. 기준 fps에서 window_frames 프레임이 차지하는 시간만큼 담는다."""
+
+    def __init__(self, window_frames: int, reference_fps: float):
+        frame_ms = 1000.0 / float(reference_fps)
+        self.window_frames = int(window_frames)
+        self.keep_ms = (self.window_frames - 0.5) * frame_ms    # 이보다 오래된 프레임은 버린다
+        self.required_ms = (self.window_frames - 1.5) * frame_ms  # 이만큼 차면 판정
+        self._t: deque = deque()
+        self.centers: deque = deque()
+        self.scales: deque = deque()
+
+    def add(self, timestamp_ms: float, center, scale) -> None:
+        self._t.append(timestamp_ms)
+        self.centers.append(center)
+        self.scales.append(scale)
+        while self._t and timestamp_ms - self._t[0] > self.keep_ms:
+            self._t.popleft()
+            self.centers.popleft()
+            self.scales.popleft()
+
+    def clear(self) -> None:
+        self._t.clear()
+        self.centers.clear()
+        self.scales.clear()
+
+    @property
+    def span_ms(self) -> float:
+        return self._t[-1] - self._t[0] if len(self._t) >= 2 else 0.0
+
+    @property
+    def ready(self) -> bool:
+        return len(self._t) >= 2 and self.span_ms >= self.required_ms
+
+    def __len__(self) -> int:
+        return len(self._t)
+
+
 @dataclass(frozen=True)
 class Observation:
     """프레임 1개의 관측값. 좌표계 변환은 호출자가 끝내서 넘긴다."""
@@ -73,9 +161,14 @@ class MoveProbe:
     sign: int = 0
     label: str = NONE
     reason: str = "NO_DATA"
+    span_ms: float = 0.0          # 윈도우에 담긴 시간
+    span_needed_ms: float = 0.0   # 판정에 필요한 시간
+    ready: Optional[bool] = None  # 시간 기준 판정 준비 여부. None이면 프레임 수로 본다
 
     @property
     def window_ready(self) -> bool:
+        if self.ready is not None:
+            return self.ready
         return self.frames_needed > 0 and self.frames_filled >= self.frames_needed
 
     @property
@@ -201,6 +294,11 @@ class ChallengeStateMachine:
         self.max_lost_frames = int(tracking["max_lost_frames"])
         self.min_detection_score = float(tracking["min_detection_score"])
 
+        # 프레임 수 기반 값들을 시간으로 바꿀 기준 fps. 04가 파일럿 영상에서 기록한다.
+        # 없으면(옛 config, 테스트) 생성자에 받은 fps를 기준으로 쓴다.
+        reference = config.get("frame_reference_fps")
+        self.reference_fps = float(reference) if reference else self.fps
+
         self.hold_frames = int(config["shape_hold_frames"])
         # 이전 단계 종료 시점의 손 모양에서 벗어나야 다음 판정을 시작한다.
         # None이면 관문을 끈다(도출 실패 시).
@@ -212,9 +310,8 @@ class ChallengeStateMachine:
         self.shape_confidence_min = (float(confidence_min)
                                      if confidence_min is not None else 0.0)
 
-        window = self.movement_detector.window_frames(self.fps)
-        self._centers: deque = deque(maxlen=window)
-        self._scales: deque = deque(maxlen=window)
+        window = self.movement_detector.window_frames(self.reference_fps)
+        self._window = TimeWindow(window, self.reference_fps)
 
         self.state = State.IDLE
         self.step_index = 0
@@ -225,16 +322,17 @@ class ChallengeStateMachine:
         self._step_started_ms: Optional[float] = None
         self._now_ms: float = 0.0
         self._frame_delta_ms: float = 0.0
-        self._hold_streak = 0
+        self._hold = FrameSpan(self.hold_frames, self.reference_fps)
         self._wrong_label: Optional[str] = None
-        self._wrong_streak = 0
+        self._wrong = FrameSpan(self.hold_frames, self.reference_fps)
         # 제한 시간 동안 사용자가 '확실히' 수행한 다른 동작. 타임아웃 때 사유를 정한다.
         self._sustained_wrong: Optional[str] = None
         self._last_shape: Optional[str] = None    # 마지막으로 검출된 손 모양
         self._escape_from: Optional[str] = None   # 벗어나야 하는 모양
-        self._escape_streak = 0
-        self._lost_streak = 0
-        self._unstable_streak = 0
+        self._escape = FrameSpan(self.escape_frames, self.reference_fps)
+        # 기존 규칙은 '연속 N프레임 초과'에서 실패였다 = N+1프레임 연속
+        self._lost = FrameSpan(self.max_lost_frames + 1, self.reference_fps)
+        self._unstable = FrameSpan(self.max_lost_frames + 1, self.reference_fps)
         self._retries_left = self.max_retries
 
     # ------------------------------------------------------------ 진행
@@ -270,7 +368,7 @@ class ChallengeStateMachine:
         if self.state == State.WAIT_HAND:
             self.state = State.ACTION
             self._step_started_ms = obs.timestamp_ms
-            self._hold_streak = 0
+            self._hold.reset()
 
         action = self.current_action
         if action is None:
@@ -292,26 +390,23 @@ class ChallengeStateMachine:
     def _update_tracking(self, obs: Observation) -> Optional[Status]:
         """손 소실/추적 불안정을 처리한다. 실패면 Status, 아니면 None."""
         if not obs.hand_found:
-            self._lost_streak += 1
-            self._hold_streak = 0
-            self._centers.clear()
-            self._scales.clear()
-            if self._lost_streak > self.max_lost_frames:
+            self._hold.reset()
+            self._window.clear()
+            if self._lost.hit(obs.timestamp_ms):
                 reason = (FailReason.HAND_NOT_FOUND if self.state == State.WAIT_HAND
                           else FailReason.HAND_LOST)
                 return self._fail(reason, obs.timestamp_ms)
             return self._status()
 
-        self._lost_streak = 0
+        self._lost.reset()
         score = obs.detection_score
         if np.isfinite(score) and score < self.min_detection_score:
-            self._unstable_streak += 1
-            self._hold_streak = 0
-            if self._unstable_streak > self.max_lost_frames:
+            self._hold.reset()
+            if self._unstable.hit(obs.timestamp_ms):
                 return self._fail(FailReason.TRACKING_UNSTABLE, obs.timestamp_ms)
             return self._status()
 
-        self._unstable_streak = 0
+        self._unstable.reset()
         return None
 
     def _update_shape(self, obs: Observation, action: str) -> Status:
@@ -325,9 +420,9 @@ class ChallengeStateMachine:
         # 못하게 되므로 보안 문제다. 이전 모양에서 실제로 벗어난 뒤에 판정한다.
         if self._escape_pending():
             if result.label != self._escape_from:
-                self._escape_streak += 1
+                self._escape.hit(obs.timestamp_ms)
             else:
-                self._escape_streak = 0
+                self._escape.reset()
             # 관문이 닫혀 있는 동안은 제한 시간을 소모하지 않는다.
             # 단계 제한과 전체 제한을 같이 미뤄야 한다. 전체 제한만 흐르게 두면
             # 마지막 단계에 관문이 걸릴 때 TOTAL_TIMEOUT으로 죽는다.
@@ -339,24 +434,24 @@ class ChallengeStateMachine:
             self._escape_from = None
 
         if result.label == action and confident:
-            self._wrong_label, self._wrong_streak = None, 0
-            self._hold_streak += 1
-            if self._hold_streak >= self.hold_frames:
+            self._wrong_label = None
+            self._wrong.reset()
+            if self._hold.hit(obs.timestamp_ms):
                 return self._advance(obs.timestamp_ms)
             return self._status(result.label, result.confidence)
 
-        self._hold_streak = 0
+        self._hold.reset()
         if not confident or result.label == UNKNOWN:
-            self._wrong_label, self._wrong_streak = None, 0
+            self._wrong_label = None
+            self._wrong.reset()
             return self._status(result.label, result.confidence)
 
         # 틀린 모양도 유지 조건을 채워야 실패로 본다. 한 프레임 오검출로 세션을
         # 끝내면, 측정상 최대 8프레임까지 나오는 순간 오검출에 정상 시도가 죽는다.
-        if result.label == self._wrong_label:
-            self._wrong_streak += 1
-        else:
-            self._wrong_label, self._wrong_streak = result.label, 1
-        if self._wrong_streak < self.hold_frames:
+        if result.label != self._wrong_label:
+            self._wrong_label = result.label
+            self._wrong.reset()
+        if not self._wrong.hit(obs.timestamp_ms):
             return self._status(result.label, result.confidence)
 
         # 여기서 바로 실패시키면 사용자가 화면의 요청을 읽고 손 모양을 바꿀 시간이
@@ -374,18 +469,19 @@ class ChallengeStateMachine:
             self._last_shape = self.shape_detector.detect(obs.angle_coords).label
 
         coords = obs.screen_coords
-        self._centers.append(g.palm_center(coords))
-        self._scales.append(g.hand_scale(coords))
+        window = self._window
+        window.add(obs.timestamp_ms, g.palm_center(coords), g.hand_scale(coords))
 
-        needed = self._scales.maxlen
-        probe = MoveProbe(frames_filled=len(self._scales), frames_needed=needed)
-        if len(self._scales) < needed:
-            return self._status(move_probe=probe)
+        base = dict(frames_filled=len(window), frames_needed=window.window_frames,
+                    span_ms=window.span_ms, span_needed_ms=window.required_ms,
+                    ready=window.ready)
+        if not window.ready:
+            return self._status(move_probe=MoveProbe(**base))
 
         result = self.movement_detector.detect_from_tracks(
-            np.array(self._centers), np.array(self._scales))
+            np.array(window.centers), np.array(window.scales))
         probe = MoveProbe(
-            frames_filled=len(self._scales), frames_needed=needed,
+            **base,
             displacement_ratio=result.displacement_ratio,
             axis_ratio=result.axis_ratio, axis=result.axis, sign=result.sign,
             label=result.label, reason=result.reason)
@@ -416,13 +512,12 @@ class ChallengeStateMachine:
                 else FailReason.WRONG_DIRECTION)
 
     def _escape_pending(self) -> bool:
-        return (self._escape_from is not None
-                and self._escape_streak < self.escape_frames)
+        return self._escape_from is not None and not self._escape.done
 
     def _escape_progress(self) -> float:
         if not self._escape_pending():
             return 1.0
-        return min(self._escape_streak / max(self.escape_frames, 1), 1.0)
+        return self._escape.progress
 
     def _arm_escape_gate(self) -> None:
         """다음 단계가 손 모양이면, 방금 끝난 시점의 손 모양에서 벗어나게 한다.
@@ -432,7 +527,7 @@ class ChallengeStateMachine:
         이미 이동을 만족시키는' 경우 자체가 생기지 않는다.
         """
         action = self.current_action
-        self._escape_streak = 0
+        self._escape.reset()
         if (self.escape_frames > 0 and action is not None
                 and is_shape_action(action) and self._last_shape is not None):
             self._escape_from = self._last_shape
@@ -447,11 +542,11 @@ class ChallengeStateMachine:
         step.passed = True
         step.elapsed_ms = timestamp_ms - self._step_started_ms
         self.step_index += 1
-        self._hold_streak = 0
-        self._wrong_label, self._wrong_streak = None, 0
+        self._hold.reset()
+        self._wrong_label = None
+        self._wrong.reset()
         self._sustained_wrong = None
-        self._centers.clear()
-        self._scales.clear()
+        self._window.clear()
         self._retries_left = self.max_retries
         if self.step_index >= len(self.challenge.actions):
             self.state = State.PASS
@@ -466,11 +561,11 @@ class ChallengeStateMachine:
             self._retries_left -= 1
             self.steps[self.step_index].retries_used += 1
             self._step_started_ms = timestamp_ms
-            self._hold_streak = 0
-            self._wrong_label, self._wrong_streak = None, 0
+            self._hold.reset()
+            self._wrong_label = None
+            self._wrong.reset()
             self._sustained_wrong = None
-            self._centers.clear()
-            self._scales.clear()
+            self._window.clear()
             return self._status()
         return self._fail(reason, timestamp_ms)
 
@@ -499,7 +594,7 @@ class ChallengeStateMachine:
             detected_shape=detected_shape,
             detected_move=detected_move,
             shape_confidence=confidence,
-            hold_progress=min(self._hold_streak / self.hold_frames, 1.0),
+            hold_progress=self._hold.progress,
             remaining_ms=remaining,
             fail_reason=self.fail_reason,
             steps=list(self.steps),

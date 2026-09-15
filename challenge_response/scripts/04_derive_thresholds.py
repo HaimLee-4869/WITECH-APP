@@ -140,6 +140,69 @@ def label_frames(frames: pd.DataFrame, space: str, thumb_th, other_th) -> pd.Ser
     return pd.Series(labels, index=frames.index)
 
 
+def derive_fist_gate(frames: pd.DataFrame, labels: pd.Series, space: str, policy):
+    """FIST로 판정된 반쯤 쥔 손을 손끝-손목 거리로 걸러내는 상한 (README 5.1).
+
+    FIST는 값이 작을수록 정상이라 백분위 방향이 다른 임계값과 반대다.
+    정상 쪽은 p(100-positive), 반례 쪽은 p(100-negative)를 쓴다.
+    반례는 '각도 규칙으로 이미 FIST가 된 NEG_halffist 프레임'만 넣는다.
+    게이트가 실제로 거르는 대상이 그 프레임들이기 때문이다.
+    """
+    if not policy.get("fist_tip_wrist_gate", False):
+        return None, "측정값 아님. derivation_policy.fist_tip_wrist_gate=false라 게이트를 걸지 않음"
+    column = f"tip_wrist_{space}"
+    if column not in frames:
+        unresolved("fist_max_tip_wrist_ratio", f"frame_features.csv에 {column}이 없다. 03을 다시 실행할 것")
+        return None, "특징 없음"
+
+    work = frames.assign(label=labels)
+    detected_halffist = work[(work.action == "NEG_halffist") & (work.label != "NO_HAND")]
+    positive = work[(work.action == "FIST") & (work.label == "FIST")][column].dropna()
+    negative = detected_halffist[detected_halffist.label == "FIST"]
+    if positive.empty or negative.empty:
+        unresolved("fist_max_tip_wrist_ratio", "FIST 정답 프레임 또는 FIST로 판정된 NEG_halffist 프레임이 없다")
+        return None, "데이터 없음"
+
+    pos_pct = 100 - policy["positive_percentile"]
+    neg_pct = 100 - policy["negative_percentile"]
+    pos_hi = float(np.percentile(positive, pos_pct))
+    neg_lo = float(np.percentile(negative[column].dropna(), neg_pct))
+    threshold, gap = gap_threshold(neg_lo, pos_hi, policy["separation_margin_ratio"])
+    source = (f"FIST 정답 프레임의 손끝-손목 거리/손 크기 p{pos_pct}={pos_hi:.3f} / "
+              f"각도 규칙으로 FIST가 된 NEG_halffist 프레임 p{neg_pct}={neg_lo:.3f} "
+              f"({len(negative)}프레임, 틈={gap:.3f}).")
+    if threshold is None:
+        unresolved("fist_max_tip_wrist_ratio",
+                   f"FIST p{pos_pct}={pos_hi:.3f}가 NEG_halffist p{neg_pct}={neg_lo:.3f} 이상이다. "
+                   "손끝 거리로도 반쯤 쥔 손을 가를 수 없다.")
+        return None, source
+
+    ratio = negative[column].to_numpy()
+    passed = negative[np.isfinite(ratio) & (ratio < threshold)]
+    per_participant = (passed.groupby("participant").size()
+                       / detected_halffist.groupby("participant").size()).fillna(0.0)
+    worst = per_participant.idxmax() if not per_participant.empty else "-"
+    fist_kept = float((positive < threshold).mean())
+    source += (f" 적용 시 NEG_halffist->FIST {len(negative) / len(detected_halffist):.1%}"
+               f"->{len(passed) / len(detected_halffist):.1%} "
+               f"(참가자별 최대 {worst} {per_participant.max():.1%}), "
+               f"FIST 정답 프레임 유지 {fist_kept:.1%}. "
+               "주의: 같은 영상으로 임계값을 정하고 평가한 수치라 낙관적이다. "
+               "새 참가자에서는 더 샐 수 있다. OPEN_PALM 쪽에는 걸지 않는다(정책 결정, README 5.1).")
+    return round(threshold, 3), source
+
+
+def apply_fist_gate(frames: pd.DataFrame, labels: pd.Series, space: str, threshold) -> pd.Series:
+    """hand_action_detector와 같은 규칙: 거리를 못 재거나 상한 이상이면 FIST가 아니다."""
+    if threshold is None:
+        return labels
+    ratio = frames[f"tip_wrist_{space}"].to_numpy()
+    blocked = (labels == "FIST").to_numpy() & ~(np.isfinite(ratio) & (ratio < threshold))
+    gated = labels.copy()
+    gated[blocked] = UNKNOWN
+    return gated
+
+
 def evaluate_shape_targets(frames: pd.DataFrame, labels: pd.Series) -> pd.DataFrame:
     rows = []
     frames = frames.assign(label=labels)
@@ -433,6 +496,38 @@ def derive_movement(clips, policy):
 
     # 5) 축→방향 대응표. 왕복 운동은 양방향이 같은 횟수로 나오므로 다수결로는
     #    좌/우를 가릴 수 없다. 각 영상의 '첫 획' 방향을 모아 만장일치를 확인한다.
+    #    실시간은 정지 상태에서 편도 1회로 판정하므로, 튕기는 방식(정지 -> 한 방향 ->
+    #    제자리 정지)으로 찍은 영상만 방향 판정에 쓴다. 변위·축비 통계(3, 4)에는
+    #    멈춤 없는 왕복 영상도 계속 쓴다.
+    style_rows = []
+    style_by_stem = {}
+    for p in profiles:
+        if p["action"] not in MOVE_ACTIONS:
+            continue
+        style = (F.move_style(p["centers"], p["scales"], p["window_frames"],
+                              shake_p95, min_disp) if min_disp is not None else None)
+        sign = F.first_stroke_sign(p["centers"], p["scales"], p["axis"],
+                                   policy["first_stroke_fraction"])
+        in_stats = p["stem"] in usable_stems
+        if not in_stats:
+            reason = "통계 제외(축비)"
+        elif style is None:
+            reason = "min_displacement_ratio 미정으로 판별 불가"
+        else:
+            reason = style.reason
+        style_by_stem[p["stem"]] = style
+        style_rows.append({
+            "stem": p["stem"], "participant": p["stem"].split("_")[0],
+            "action": p["action"], "condition": p["condition"],
+            "used_for_stats": in_stats,
+            "used_for_direction": bool(in_stats and style is not None and style.is_flick),
+            "reason": reason,
+            "starts_at_rest": style.starts_at_rest if style else None,
+            "opposite_excursion": round(style.opposite_excursion, 3) if style else None,
+            "one_way_bouts": len(style.bouts) if style else None,
+            "first_stroke": f"{'x' if p['axis'] == 0 else 'y'}{sign:+d}",
+        })
+
     direction_map = {}
     direction_detail = {}
     for action in MOVE_ACTIONS:
@@ -440,13 +535,16 @@ def derive_movement(clips, policy):
         for p in usable:
             if p["action"] != action:
                 continue
+            style = style_by_stem.get(p["stem"])
+            if style is None or not style.is_flick:
+                continue
             sign = F.first_stroke_sign(p["centers"], p["scales"], p["axis"],
                                        policy["first_stroke_fraction"])
             if sign:
                 votes.append((("x" if p["axis"] == 0 else "y"), sign))
         if not votes:
             unresolved(f"movement.direction_map.{action}",
-                       "쓸 수 있는 영상이 없어 방향을 정하지 못했다")
+                       "튕기는 방식으로 찍은 영상이 없어 방향을 정하지 못했다")
             continue
         (axis, sign), agree = Counter(votes).most_common(1)[0]
         direction_map[action] = [axis, int(sign)]
@@ -470,12 +568,34 @@ def derive_movement(clips, policy):
         + ", ".join(f"{r['stem']}(축비 {r['axis_ratio']}, 관측 {r['observed_axis']}축)"
                     for r in rejected)) if rejected else "제외한 영상 없음"
 
+    for action in MOVE_ACTIONS:
+        if action in direction_detail:
+            used = [r for r in style_rows if r["action"] == action and r["used_for_direction"]]
+            direction_detail[action]["participants"] = sorted({r["participant"] for r in used})
+    direction_rule = (
+        "방향 판정에는 '튕기는 방식' 영상만 쓴다(실시간은 정지 상태에서 편도 1회로 판정하므로 "
+        "멈춤 없는 왕복 영상은 실사용 조건과 다르다. 2026-09-16 결정). 판별 조건 3개를 모두 "
+        "만족해야 한다. 새 임계값은 없고 04가 도출한 값만 쓴다. "
+        f"(1) 정지 상태로 시작: 진입 구간을 자른 뒤 첫 {window_ms:.0f}ms 윈도우의 변위가 "
+        f"NEG_shake 윈도우 p{neg_pct}={shake_p95:.3f}(제자리 흔들림 수준) 미만. "
+        "(2) 한쪽으로만 이동: 주축에서 출발점(첫 윈도우 평균 위치) 반대편으로 "
+        f"min_displacement_ratio={min_disp if min_disp is None else round(min_disp, 3)} "
+        "이상 넘어간 적이 없음. "
+        "(3) 제자리 복귀: 출발점에서 주축으로 min_displacement_ratio 이상 떠났다가, "
+        "변위가 NEG_shake p95 미만인 윈도우 전체가 출발점 그 거리 안으로 돌아온 적이 1회 이상. "
+        "주의: 이 조건들은 파일럿 영상의 판별 결과를 보면서 세 차례 고쳐 정했다"
+        "(정지 판정을 min_displacement_ratio에서 NEG_shake p95로, 복귀 판정을 2D 거리에서 "
+        "주축 거리로). 같은 데이터로 규칙을 정하고 적용했다는 뜻이다.")
+    direction_excluded = [f"{r['stem']}({r['reason']})" for r in style_rows
+                          if not r["used_for_direction"]]
+
     movement = {
         "window_ms": int(window_ms),
         "min_displacement_ratio": round(min_disp, 3) if min_disp is not None else None,
         "axis_dominance_ratio": round(axis_th, 3) if axis_th is not None else None,
         "max_duration_ms": max_duration_ms,
         "direction_map": direction_map,
+        "rest_displacement_ratio": round(shake_p95, 3),
         "_source": {
             "window_ms": (f"MOVE 영상 획 1회 소요시간(주축 궤적의 평균선 교차 횟수로 측정) "
                           f"p{policy['stroke_window_percentile']}={fastest:.0f}ms에 가장 "
@@ -485,20 +605,31 @@ def derive_movement(clips, policy):
             "max_duration_ms": (f"획 1회 소요시간 p{policy['stroke_timeout_percentile']}="
                                 f"{slowest:.0f}ms ({durations.size}개 영상, "
                                 f"{step}ms 단위 올림)"),
-            "direction_map": ("각 영상의 첫 획 방향: " + ", ".join(
-                f"{a}->{d['axis']}{d['sign']:+d}({d['agree']}/{d['clips']}영상 일치)"
+            "direction_map": ("튕기는 방식 영상의 첫 획 방향: " + ", ".join(
+                f"{a}->{d['axis']}{d['sign']:+d}({d['agree']}/{d['clips']}영상 일치, "
+                f"{'·'.join(d['participants'])})"
                 for a, d in direction_detail.items())),
+            "direction_clip_rule": direction_rule,
+            "direction_excluded_clips": (
+                f"방향 판정에서 뺀 MOVE 영상 {len(direction_excluded)}개 "
+                "(reports/direction_votes.csv): " + ", ".join(direction_excluded)),
+            "rest_displacement_ratio": (
+                f"NEG_shake 윈도우 p{neg_pct}={shake_p95:.3f} (window={window_ms:.0f}ms). "
+                "촬영 방식 판별(04 direction_map, 05 편도 검증)에만 쓴다. 실시간 판정에는 "
+                "쓰지 않는다."),
             "excluded_clips": excluded_note,
         },
     }
     detail = {
         "rejected": rejected, "diagonal_ceiling": ceiling,
+        "stroke_durations_ms": [float(d) for d in durations],
         "stroke_ms": {"p5": float(np.percentile(durations, 5)),
                       "p50": float(np.percentile(durations, 50)),
                       "p95": float(np.percentile(durations, 95))},
         "move_p5": move_p5, "shake_p95": shake_p95,
         "axis": {"move_p5": axis_p5, "diagonal_p95": axis_p95},
         "direction": direction_detail,
+        "direction_votes": pd.DataFrame(style_rows),
     }
     return movement, detail
 
@@ -530,7 +661,18 @@ def derive_tracking(frames: pd.DataFrame, policy) -> tuple[dict, dict]:
                    f"({len(positive_gaps)}건) / NEG_exit 중간 끊김 "
                    f"p{policy['positive_percentile']}={exit_p5:.1f}프레임 "
                    f"({len(exit_gaps)}건, 틈={gap:.1f}프레임)")
-    if max_lost is None:
+    min_samples = int(policy.get("lost_frames_min_samples", 0))
+    provisional = policy.get("max_lost_frames_provisional")
+    if len(positive_gaps) < min_samples:
+        # 끊김이 거의 없다는 건 좋은 소식이지만, 그 p95로 임계값을 정할 수는 없다.
+        unresolved("tracking.max_lost_frames",
+                   f"정상 영상 중간 끊김이 {len(positive_gaps)}건뿐이라(최소 {min_samples}건) "
+                   f"p{policy['negative_percentile']}를 믿을 수 없다. "
+                   f"임시값 {provisional}을 쓴다(측정값 아님).")
+        max_lost_frames = int(provisional) if provisional is not None else None
+        lost_source = (f"근거 부족으로 도출하지 않음 ({lost_source}). "
+                       f"임시값 {provisional}: " + policy.get("max_lost_frames_provisional_note", ""))
+    elif max_lost is None:
         unresolved("tracking.max_lost_frames",
                    f"정상 영상 끊김 p{policy['negative_percentile']}={pos_p95:.1f}가 "
                    f"NEG_exit 끊김 p{policy['positive_percentile']}={exit_p5:.1f} 이상이다. "
@@ -560,33 +702,50 @@ def derive_tracking(frames: pd.DataFrame, policy) -> tuple[dict, dict]:
 
 
 def derive_timing(frames: pd.DataFrame, labels: pd.Series, hold_frames: int,
-                  movement: dict, policy, num_actions: int) -> dict:
-    """단계별 제한 시간을 파일럿 영상의 소요 시간에서 뽑는다."""
+                  stroke_durations_ms, policy, num_actions: int) -> dict:
+    """단계별 제한 시간을 파일럿 영상의 소요 시간에서 뽑는다.
+
+    손 모양: 손이 처음 검출된 프레임부터 hold_frames 연속 정답까지. 영상 시작부터
+    재면 손이 화면에 들어오기 전 시간이 섞인다.
+    이동: MOVE 영상별 획 1회 소요시간을 영상마다 1건씩 넣는다. 예전처럼 대표값
+    1건만 넣으면 손 모양 영상 수가 늘수록 p95가 손 모양 쪽으로 끌려 내려간다.
+    """
     frames = frames.assign(label=labels)
-    times_ms: list[float] = []
+    shape_ms: list[float] = []
     for stem, grp in frames[frames.action.isin(SHAPE_ACTIONS)].groupby("stem"):
         grp = grp.sort_values("frame")
+        valid = grp.valid.to_numpy(dtype=bool)
+        if not valid.any():
+            continue
+        start = int(np.argmax(valid))
         correct = (grp.label == grp.action).to_numpy()
         fps = float(grp.fps.iloc[0]) or 1.0
         streak, first = 0, None
-        for i, ok in enumerate(correct):
-            streak = streak + 1 if ok else 0
+        for i in range(start, len(correct)):
+            streak = streak + 1 if correct[i] else 0
             if streak >= hold_frames:
                 first = i
                 break
         if first is not None:
-            times_ms.append((first + 1) / fps * 1000.0)
-    move_ms = movement.get("max_duration_ms")
-    if move_ms:
-        times_ms.append(float(move_ms))
+            shape_ms.append((first - start + 1) / fps * 1000.0)
+    move_ms = [float(d) for d in (stroke_durations_ms or []) if np.isfinite(d)]
+    times_ms = shape_ms + move_ms
 
     step = policy["timeout_round_ms"]
+    pct = policy["timeout_percentile"]
+
+    def describe(values):
+        return (f"{len(values)}건, p50={np.percentile(values, 50):.0f}ms, "
+                f"p{pct}={np.percentile(values, pct):.0f}ms") if values else "0건"
+
     if times_ms:
-        p = float(np.percentile(times_ms, policy["timeout_percentile"]))
+        p = float(np.percentile(times_ms, pct))
         per_action = int(np.ceil(p / step) * step)
-        source = (f"손 모양 영상에서 {hold_frames}프레임 연속 정답까지 걸린 시간과 "
-                  f"이동 획 1회 시간의 p{policy['timeout_percentile']}={p:.0f}ms "
-                  f"({len(times_ms)}건, {step}ms 단위 올림)")
+        source = (f"손 모양 영상에서 손이 처음 검출된 뒤 {hold_frames}프레임 연속 정답까지 "
+                  f"걸린 시간({describe(shape_ms)})과 MOVE 영상별 획 1회 소요시간"
+                  f"({describe(move_ms)})을 합친 p{pct}={p:.0f}ms "
+                  f"({len(times_ms)}건, {step}ms 단위 올림). 요청을 읽고 반응하는 시간은 "
+                  "파일럿 영상으로 잴 수 없어 들어가지 않았다.")
     else:
         per_action, source = None, "측정 데이터 없음"
         unresolved("timing.per_action_timeout_ms", "정답 유지 구간을 찾지 못했다")
@@ -637,10 +796,13 @@ def main() -> int:
     hold_frames, hold_source = None, "임계값 미정으로 계산하지 못함"
     escape_frames, escape_source = None, "임계값 미정으로 계산하지 못함"
     labels = None
+    fist_gate, fist_gate_source = None, "임계값 미정으로 계산하지 못함"
     confidence_margin = None
     confidence_min, confidence_min_source = None, "임계값 미정으로 계산하지 못함"
     if others_th is not None:
         labels = label_frames(frames, space, thumb_th, others_th)
+        fist_gate, fist_gate_source = derive_fist_gate(frames, labels, space, policy)
+        labels = apply_fist_gate(frames, labels, space, fist_gate)
         shape_targets = evaluate_shape_targets(frames, labels)
         shape_targets.to_csv(report_dir / "shape_label_distribution.csv",
                              index=False, encoding="utf-8-sig")
@@ -651,9 +813,14 @@ def main() -> int:
             frames, labels, space, others_th, confidence_margin, policy)
 
     movement, movement_detail = derive_movement(clips, policy)
+    direction_votes = movement_detail.get("direction_votes")
+    if direction_votes is not None and not direction_votes.empty:
+        direction_votes.to_csv(report_dir / "direction_votes.csv",
+                               index=False, encoding="utf-8-sig")
     tracking, _ = derive_tracking(frames, policy)
     num_actions = 3
-    timing = (derive_timing(frames, labels, hold_frames, movement, policy, num_actions)
+    timing = (derive_timing(frames, labels, hold_frames,
+                            movement_detail.get("stroke_durations_ms"), policy, num_actions)
               if labels is not None else
               {"per_action_timeout_ms": None, "total_timeout_ms": None,
                "max_retries": policy["max_retries"],
@@ -681,6 +848,15 @@ def main() -> int:
                           f"(틈={fd['thumb']['gap']:.1f}도)" if "thumb" in fd else "도출 실패"),
             },
         },
+        "fist_max_tip_wrist_ratio": fist_gate,
+        "_source_fist_max_tip_wrist_ratio": fist_gate_source,
+        "frame_reference_fps": round(float(np.median([c.fps for c in clips])), 3),
+        "_source_frame_reference_fps": (
+            f"파일럿 영상 fps 중앙값 ({len(clips)}개 영상, "
+            f"범위 {min(c.fps for c in clips):.2f}~{max(c.fps for c in clips):.2f}). "
+            "shape_hold_frames·escape_frames·max_lost_frames와 이동 윈도우 프레임 수는 이 fps의 "
+            "영상에서 센 값이다. 실시간은 fps가 다르므로(웹캠 약 20fps) 이 fps 기준 시간으로 "
+            "바꿔 판정한다. 측정값이지만 판정 임계값은 아니다."),
         "shape_hold_frames": hold_frames,
         "_source_shape_hold_frames": hold_source,
         "shape_confidence_margin_deg": confidence_margin,
@@ -717,6 +893,7 @@ def main() -> int:
             print(shape_targets[cols].to_string(
                 index=False, float_format=lambda v: f"{v * 100:6.1f}%"))
 
+    print(f"  FIST 손끝-손목 상한 = {fist_gate}")
     print(f"  신뢰도 하한 = {confidence_min}, "
           f"이전 모양 이탈 = {escape_frames}프레임")
 
@@ -726,6 +903,11 @@ def main() -> int:
     print(f"  axis_dominance_ratio   = {movement['axis_dominance_ratio']}")
     print(f"  max_duration_ms        = {movement['max_duration_ms']}")
     print(f"  direction_map          = {movement['direction_map']}")
+    if direction_votes is not None and not direction_votes.empty:
+        print("\n=== 방향 판정 영상 (튕기는 방식만 사용, reports/direction_votes.csv) ===")
+        cols = ["stem", "used_for_direction", "first_stroke", "reason"]
+        with pd.option_context("display.width", 200, "display.max_colwidth", 60):
+            print(direction_votes[cols].to_string(index=False))
     print(f"\n  추적: {tracking['max_lost_frames']}프레임, "
           f"최소 점수 {tracking['min_detection_score']}")
     print(f"  타이밍: 단계 {timing['per_action_timeout_ms']}ms / "

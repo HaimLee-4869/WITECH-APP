@@ -151,3 +151,51 @@ def test_prepare_applies_aspect_correction_for_image_space():
 
 def test_every_declared_pattern_is_distinct():
     assert len(set(SHAPE_PATTERNS.values())) == len(SHAPE_PATTERNS)
+
+
+# ---------------------------------------------------------------- FIST 손끝 거리 게이트 (README 5.1)
+
+def fist_hand():
+    return hand_for(pattern_dict(SHAPE_PATTERNS["FIST"]))
+
+
+def test_no_fist_gate_key_keeps_fist(detector):
+    assert detector.fist_max_tip_wrist_ratio is None
+    assert detector.detect(fist_hand()).label == "FIST"
+
+
+def test_null_fist_gate_keeps_fist():
+    """도출 실패(null)는 게이트 없음으로 해석한다."""
+    detector = HandActionDetector({**TEST_CONFIG, "fist_max_tip_wrist_ratio": None})
+    assert detector.detect(fist_hand()).label == "FIST"
+
+
+def test_fist_with_tips_close_to_wrist_passes_gate():
+    from core.geometry import fingertip_wrist_ratio
+    ratio = fingertip_wrist_ratio(fist_hand())
+    detector = HandActionDetector({**TEST_CONFIG, "fist_max_tip_wrist_ratio": ratio + 0.05})
+    result = detector.detect(fist_hand())
+    assert result.label == "FIST"
+    assert result.tip_wrist_ratio == pytest.approx(ratio)
+
+
+def test_half_fist_with_tips_far_from_wrist_is_unknown():
+    """각도 패턴은 FIST지만 손끝이 멀면 반쯤 쥔 손이다."""
+    from core.geometry import fingertip_wrist_ratio
+    ratio = fingertip_wrist_ratio(fist_hand())
+    detector = HandActionDetector({**TEST_CONFIG, "fist_max_tip_wrist_ratio": ratio - 0.05})
+    assert detector.detect(fist_hand()).label == UNKNOWN
+
+
+def test_fist_gate_boundary_is_exclusive():
+    from core.geometry import fingertip_wrist_ratio
+    ratio = fingertip_wrist_ratio(fist_hand())
+    detector = HandActionDetector({**TEST_CONFIG, "fist_max_tip_wrist_ratio": ratio})
+    assert detector.detect(fist_hand()).label == UNKNOWN
+
+
+@pytest.mark.parametrize("label", ["OPEN_PALM", "INDEX", "TWO_FINGERS"])
+def test_fist_gate_does_not_touch_other_shapes(label):
+    """OPEN_PALM 쪽에는 게이트를 걸지 않기로 했다. 다른 모양도 영향이 없어야 한다."""
+    detector = HandActionDetector({**TEST_CONFIG, "fist_max_tip_wrist_ratio": 0.01})
+    assert detector.detect(hand_for(pattern_dict(SHAPE_PATTERNS[label]))).label == label

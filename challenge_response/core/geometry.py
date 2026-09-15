@@ -67,6 +67,21 @@ def hand_scale(landmarks: np.ndarray) -> float:
     return float(np.linalg.norm(lm[MIDDLE_MCP] - lm[WRIST]))
 
 
+def fingertip_wrist_ratio(landmarks: np.ndarray) -> float:
+    """엄지 제외 4손끝과 손목 사이 평균 거리 / 손 크기. 화면 평면(x, y)에서 잰다.
+
+    MCP-PIP-TIP 각도는 손바닥 쪽 관절(MCP)이 굽은 것을 보지 못한다. 반쯤 쥔 손은
+    손끝이 손목에서 주먹보다 멀리 있으므로 이 거리로 FIST와 가른다 (README 5.1).
+    z는 MediaPipe 추정 잡음이 커서 쓰지 않는다.
+    """
+    lm = np.asarray(landmarks, dtype=np.float64)
+    scale = float(np.linalg.norm(lm[MIDDLE_MCP, :2] - lm[WRIST, :2]))
+    if not np.isfinite(scale) or scale == 0:
+        return float("nan")
+    tips = [FINGER_JOINTS[n][2] for n in NON_THUMB_FINGERS]
+    return float(np.mean(np.linalg.norm(lm[tips, :2] - lm[WRIST, :2], axis=1)) / scale)
+
+
 def palm_center(landmarks: np.ndarray) -> np.ndarray:
     """손바닥 뼈대(0,5,9,13,17)의 평균. 손끝은 흔들려서 제외한다."""
     lm = np.asarray(landmarks, dtype=np.float64)

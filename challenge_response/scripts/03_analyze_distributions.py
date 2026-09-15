@@ -63,6 +63,8 @@ def build_frame_table(clips, policy) -> pd.DataFrame:
     rows = []
     for clip in clips:
         angles = {sp: F.frame_angles(clip, sp) for sp in policy["angle_spaces_considered"]}
+        tip_wrist = {sp: F.frame_tip_wrist_ratios(clip, sp)
+                     for sp in policy["angle_spaces_considered"]}
         centers, scales = F.frame_palm_tracks(clip)
         n = clip.num_frames
         for i in range(n):
@@ -83,6 +85,7 @@ def build_frame_table(clips, policy) -> pd.DataFrame:
             for sp, arr in angles.items():
                 for j, name in enumerate(FINGER_NAMES):
                     row[f"angle_{sp}_{name}"] = float(arr[i, j])
+                row[f"tip_wrist_{sp}"] = float(tip_wrist[sp][i])
             rows.append(row)
     return pd.DataFrame(rows)
 

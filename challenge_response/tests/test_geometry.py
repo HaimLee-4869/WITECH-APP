@@ -134,3 +134,26 @@ def test_extension_flags_nan_angle_is_not_extended():
     flags, margins = g.extension_flags(angles, 150.0, 160.0)
     assert flags[0] is False
     assert np.isnan(margins[0])
+
+
+def test_fingertip_wrist_ratio_is_invariant_to_hand_size_and_position():
+    near = g.fingertip_wrist_ratio(make_hand(60.0, scale=1.0))
+    far = g.fingertip_wrist_ratio(make_hand(60.0, scale=0.3, center=(0.7, 0.4, 0.2)))
+    assert near == pytest.approx(far)
+
+
+def test_fingertip_wrist_ratio_is_smaller_for_tighter_fist():
+    """반쯤 쥔 손은 손끝이 손목에서 주먹보다 멀다. 이 순서가 FIST 게이트의 전제다."""
+    assert g.fingertip_wrist_ratio(make_hand(20.0)) < g.fingertip_wrist_ratio(make_hand(80.0))
+    assert g.fingertip_wrist_ratio(make_hand(80.0)) < g.fingertip_wrist_ratio(make_hand(180.0))
+
+
+def test_fingertip_wrist_ratio_ignores_depth():
+    hand = make_hand(60.0)
+    deep = hand.copy()
+    deep[:, 2] += np.linspace(0.0, 5.0, 21)
+    assert g.fingertip_wrist_ratio(deep) == pytest.approx(g.fingertip_wrist_ratio(hand))
+
+
+def test_fingertip_wrist_ratio_nan_when_scale_is_zero():
+    assert np.isnan(g.fingertip_wrist_ratio(np.zeros((21, 3))))

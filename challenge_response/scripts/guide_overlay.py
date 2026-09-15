@@ -76,6 +76,40 @@ def draw_arrow(canvas, box, dx, dy, thickness=0) -> None:
     cv2.arrowedLine(canvas, start, end, ARROW, thickness, cv2.LINE_AA, tipLength=0.32)
 
 
+# 가장자리 경고의 여유 거리(손 크기 배수). 판정 임계값이 아니라 화면 안내용이다.
+# 손 윤곽이 영상 가장자리에서 손 크기(손목-중지 MCP)의 이 배수 안으로 들어오면 경고한다.
+# 2026-09-16 실시간 세션에서 잰 값으로 정했다 (손 놓치기 직전 프레임 39개 vs 평소 프레임):
+#   1.0  -> 평소 96% 켜짐 / 놓치기 직전 95% 잡음   (항상 켜져 경고 구실을 못 함)
+#   0.25 -> 평소 37% 켜짐 / 놓치기 직전 74% 잡음
+# 표본이 한 사람·두 세션뿐이라 참가자가 늘면 다시 잰다.
+EDGE_MARGIN_HAND_SCALES = 0.25
+EDGE_NAMES_KO = {"top": "위쪽", "bottom": "아래쪽", "left": "왼쪽", "right": "오른쪽"}
+
+
+def edge_sides(landmarks, width: int, height: int,
+               margin_hand_scales: float = EDGE_MARGIN_HAND_SCALES) -> list[str]:
+    """손이 가까이 붙은 **화면 기준** 가장자리 목록 ("top"/"bottom"/"left"/"right").
+
+    landmarks는 MediaPipe 원본(정규화) 좌표다. 화면은 거울로 뒤집어 보여주므로
+    원본 x=0 쪽이 화면 오른쪽이다.
+    """
+    pts = np.asarray(landmarks, dtype=np.float64)[:, :2] * np.array([width, height], float)
+    if not np.isfinite(pts).all():
+        return []
+    margin = float(np.linalg.norm(pts[9] - pts[0])) * margin_hand_scales
+    screen_x = width - pts[:, 0]
+    sides = []
+    if pts[:, 1].min() < margin:
+        sides.append("top")
+    if height - pts[:, 1].max() < margin:
+        sides.append("bottom")
+    if screen_x.min() < margin:
+        sides.append("left")
+    if width - screen_x.max() < margin:
+        sides.append("right")
+    return sides
+
+
 def draw_guide(canvas, action: str, config: dict,
                origin=None, size: int = 150) -> None:
     """요청 동작 1개를 그림으로 그린다."""

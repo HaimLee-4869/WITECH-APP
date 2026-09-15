@@ -29,6 +29,16 @@ def angle_source(clip, space: str) -> np.ndarray:
     raise ValueError(f"알 수 없는 angle_space: {space!r}")
 
 
+def frame_tip_wrist_ratios(clip, space: str) -> np.ndarray:
+    """(F,) 손끝-손목 거리 / 손 크기. 검출 실패 프레임은 nan."""
+    coords = angle_source(clip, space)
+    out = np.full(coords.shape[0], np.nan, dtype=np.float64)
+    for i in range(coords.shape[0]):
+        if clip.valid_mask[i]:
+            out[i] = g.fingertip_wrist_ratio(coords[i])
+    return out
+
+
 def screen_coords(clip) -> np.ndarray:
     """이동 판정에 쓸 화면 좌표 (F,21,3). 종횡비 보정된 픽셀 단위."""
     return g.to_isotropic(clip.landmarks, clip.width, clip.height)
@@ -147,6 +157,99 @@ def count_strokes(centers: np.ndarray, axis: int, scales: np.ndarray,
             direction = new_direction
         anchor = value
     return strokes
+
+
+@dataclass(frozen=True)
+class MoveStyle:
+    """MOVE 영상의 촬영 방식. 방향 판정(04)과 편도 검증(05)이 같은 규칙을 쓴다.
+
+    인덱스는 모두 슬라이딩 윈도우의 시작 프레임이다.
+    """
+    starts_at_rest: bool              # 첫 윈도우가 정지인가
+    opposite_excursion: float         # 주축에서 출발점 반대편으로 넘어간 최대 거리 / 손 크기
+    one_sided: bool                   # opposite_excursion < min_displacement_ratio
+    bouts: tuple[tuple[int, int], ...]  # 출발점을 떠났다가 돌아와 멈춘 구간 [떠난 윈도우, 복귀 정지 윈도우)
+    ends_away: bool                   # 마지막 이탈 뒤 돌아와 멈추기 전에 영상이 끝났는가
+
+    @property
+    def is_flick(self) -> bool:
+        """출발점에서 멈췄다가 한 방향으로 튕기고 돌아와 멈추는 방식인가.
+
+        1. 정지 상태로 시작한다. 첫 획이 라벨 방향이라는 가정(first_stroke_sign)이
+           여기서 성립한다.
+        2. 주축에서 출발점 반대편으로는 판정기가 이동으로 볼 만큼 넘어가지 않는다.
+        3. 출발점을 떠났다가 돌아와 멈춘 적이 한 번 이상 있다.
+        멈춤 없는 왕복은 대개 출발점 양쪽으로 넘어가거나(2) 정지로 시작하지 않는다(1).
+        """
+        return self.starts_at_rest and self.one_sided and bool(self.bouts)
+
+    @property
+    def reason(self) -> str:
+        if self.is_flick:
+            return "튕기는 방식"
+        if not self.starts_at_rest:
+            return "정지 상태로 시작하지 않음"
+        if not self.one_sided:
+            return f"출발점 양쪽으로 이동(반대편 {self.opposite_excursion:.2f})"
+        return "출발점으로 돌아와 멈춘 적 없음"
+
+    def one_way_bouts(self) -> list[tuple[int, int]]:
+        """'정지 -> 한 방향 이동 -> 제자리 정지' 한 번씩 (편도 1회 시도)."""
+        return list(self.bouts)
+
+
+def move_style(centers: np.ndarray, scales: np.ndarray, window_frames: int,
+               rest_displacement_ratio: float, min_displacement_ratio: float) -> MoveStyle:
+    """촬영 방식을 판별한다. 새 임계값 없이 04가 도출한 값만 쓴다.
+
+    - 정지 윈도우: 윈도우 변위가 rest_displacement_ratio(NEG_shake 윈도우 p95,
+      제자리 흔들림 수준) 미만. 윈도우 자체가 window_ms 길이이므로 정지 윈도우
+      하나 = window_ms 동안 제자리.
+    - 출발점: 첫 윈도우가 덮는 프레임의 평균 손바닥 위치.
+    - 이탈/복귀는 주축(영상 전체에서 이동 범위가 큰 축) 방향으로만 잰다. 출발점에서
+      min_displacement_ratio(판정기가 이동으로 보는 최소 변위) 이상 떨어지면 이탈,
+      이탈 뒤 정지 윈도우의 모든 프레임이 그 거리 안으로 들어오면 복귀.
+    """
+    wf = int(window_frames)
+    motions = sliding_window_motions(centers, scales, wf)
+    empty = MoveStyle(False, float("nan"), False, (), False)
+    if not motions:
+        return empty
+    still = np.array([m.valid and m.displacement_ratio < rest_displacement_ratio
+                      for m in motions], dtype=bool)
+    pts = np.asarray(centers, dtype=np.float64)[:, :2]
+    scale = float(np.nanmedian(scales))
+    if not np.isfinite(scale) or scale <= 0:
+        return empty
+
+    axis, _, _ = primary_axis(centers, scales)
+    home = float(np.nanmean(pts[:wf, axis]))
+    along = (pts[:, axis] - home) / scale
+    distance = np.abs(along)
+
+    leaving = np.flatnonzero(distance >= min_displacement_ratio)
+    if leaving.size:
+        sign = np.sign(along[leaving[0]])
+        opposite = float(np.nanmax(np.concatenate([[0.0], -sign * along[np.isfinite(along)]])))
+    else:
+        opposite = 0.0
+
+    bouts: list[tuple[int, int]] = []
+    away_since = None
+    for i in range(len(still)):
+        window = distance[i:i + wf]
+        if not np.isfinite(window).any():
+            continue
+        if away_since is None:
+            if np.nanmax(window) >= min_displacement_ratio:
+                away_since = i
+        elif still[i] and np.nanmax(window) < min_displacement_ratio:
+            bouts.append((away_since, i))
+            away_since = None
+
+    return MoveStyle(starts_at_rest=bool(still[0]), opposite_excursion=opposite,
+                     one_sided=opposite < min_displacement_ratio, bouts=tuple(bouts),
+                     ends_away=away_since is not None)
 
 
 def percentile_summary(values: np.ndarray, percentiles=(5, 25, 50, 75, 95)) -> dict:

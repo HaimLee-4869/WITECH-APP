@@ -4,6 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from core import features as F
 from core.movement_detector import NONE, MovementDetector
 from tests.synth import make_sequence
 
@@ -137,3 +138,66 @@ def test_window_frames_scales_with_fps(detector):
 def test_invalid_coordinate_frame_is_rejected():
     with pytest.raises(ValueError):
         MovementDetector({**TEST_CONFIG, "coordinate_frame": "screen"})
+
+
+# ---------------------------------------------------------------- 촬영 방식 판별 (04 direction_map, 05 편도 검증)
+
+_WF = 10          # 윈도우 프레임 수
+_REST = 0.05      # 정지로 보는 윈도우 변위 상한 (실제로는 NEG_shake p95)
+_MIN_DISP = 0.2   # 판정기가 이동으로 보는 최소 변위
+
+
+def _track(xs):
+    """x 궤적(손 크기 1 기준) -> (centers, scales)."""
+    xs = np.asarray(xs, dtype=float)
+    centers = np.zeros((len(xs), 3))
+    centers[:, 0] = xs
+    return centers, np.ones(len(xs))
+
+
+def _flick(direction=-1, strokes=3, rest=25, out=8):
+    xs = [0.0] * rest
+    for _ in range(strokes):
+        xs += list(direction * np.linspace(0, 1, out)) + list(direction * np.linspace(1, 0, out))
+        xs += [0.0] * rest
+    return xs
+
+
+def test_flick_style_is_detected_with_one_bout_per_stroke():
+    style = F.move_style(*_track(_flick(strokes=3)), _WF, _REST, _MIN_DISP)
+    assert style.is_flick
+    assert len(style.one_way_bouts()) == 3
+    assert style.opposite_excursion < _MIN_DISP
+
+
+def test_continuous_back_and_forth_is_not_flick():
+    xs = np.sin(np.linspace(0, 6 * np.pi, 180))
+    style = F.move_style(*_track(xs), _WF, _REST, _MIN_DISP)
+    assert not style.is_flick
+
+
+def test_clip_that_starts_moving_is_not_flick():
+    xs = list(np.linspace(0, -1, 8)) + _flick(strokes=2)
+    style = F.move_style(*_track(xs), _WF, _REST, _MIN_DISP)
+    assert not style.starts_at_rest
+    assert not style.is_flick
+
+
+def test_moving_to_both_sides_of_the_start_is_not_flick():
+    xs = _flick(direction=-1, strokes=1) + _flick(direction=+1, strokes=1)
+    style = F.move_style(*_track(xs), _WF, _REST, _MIN_DISP)
+    assert not style.one_sided
+    assert not style.is_flick
+
+
+def test_flick_without_return_to_rest_is_not_flick():
+    xs = [0.0] * 25 + list(np.linspace(0, -1, 8)) + [-1.0] * 25
+    style = F.move_style(*_track(xs), _WF, _REST, _MIN_DISP)
+    assert style.ends_away
+    assert not style.is_flick
+
+
+def test_flick_is_direction_agnostic():
+    left = F.move_style(*_track(_flick(direction=-1)), _WF, _REST, _MIN_DISP)
+    right = F.move_style(*_track(_flick(direction=+1)), _WF, _REST, _MIN_DISP)
+    assert left.is_flick and right.is_flick

@@ -4,7 +4,8 @@
 도출된 challenge_config.json을 그대로 쓴다.
 
   손 모양 영상 -> 판정이 파일명 동작과 일치하는 프레임 비율
-  MOVE 영상    -> 왕복 3회가 모두 올바른 방향으로 검출되는지
+  MOVE 영상    -> 편도 1회(정지 -> 한 방향 -> 제자리 정지)마다 처음 검출된 방향이
+                  라벨과 같은지. 튕기는 방식으로 찍은 영상만 평가한다.
   NEG 영상     -> UNKNOWN / NONE으로 나오는 프레임 비율
 
 결과를 혼동 행렬로 출력하고 SPEC 4.11 목표 대비 달성 여부를 표기한다.
@@ -46,27 +47,64 @@ def detector_confidence_gate(detector: HandActionDetector) -> float:
     return getattr(detector, "confidence_min", 0.0)
 
 
-def detect_move_events(clip, movement: MovementDetector, trim_windows: int) -> list[dict]:
-    """영상을 훑으며 이동 검출 '사건'을 뽑는다.
-
-    연속으로 같은 방향이 검출되면 한 사건으로 묶는다. 왕복 3회면 라벨 방향으로
-    3번 검출되어야 한다.
-    """
+def trimmed_tracks(clip, movement: MovementDetector, trim_windows: int):
+    """진입·이탈 구간을 자른 손바닥 궤적. (centers, scales, 시작 프레임, 윈도우 프레임 수)"""
     centers, scales = F.frame_palm_tracks(clip)
     wf = movement.window_frames(clip.fps)
     start, stop = F.stable_span(np.isfinite(scales), wf * trim_windows)
-    centers, scales = centers[start:stop], scales[start:stop]
+    return centers[start:stop], scales[start:stop], start, wf
+
+
+def detect_move_events(clip, movement: MovementDetector, trim_windows: int) -> list[dict]:
+    """영상을 훑으며 이동 검출 '사건'을 뽑는다.
+
+    연속으로 같은 방향이 검출되면 한 사건으로 묶는다.
+    """
+    centers, scales, start, wf = trimmed_tracks(clip, movement, trim_windows)
 
     events: list[dict] = []
     previous = NONE
     for i in range(0, max(len(scales) - wf + 1, 0)):
         result = movement.detect_from_tracks(centers[i:i + wf], scales[i:i + wf])
         if result.label != NONE and result.label != previous:
-            events.append({"frame": start + i, "label": result.label,
+            events.append({"frame": start + i, "window": i, "label": result.label,
                            "displacement": result.displacement_ratio,
                            "axis_ratio": result.axis_ratio})
         previous = result.label
     return events
+
+
+def evaluate_one_way(clip, events: list[dict], movement: MovementDetector,
+                     config: dict, trim_windows: int) -> dict:
+    """편도 1회 기준 검증 (2026-09-16, README 4장).
+
+    실시간 이동 단계는 정지 상태에서 요청 방향으로 한 번 움직이는 것을 판정한다.
+    튕기는 방식 영상을 '정지 -> 한 방향 이동 -> 제자리 정지' 구간으로 나누고,
+    각 구간에서 **처음 검출된 방향**이 라벨과 같아야 성공으로 센다. 구간 안에서
+    아무것도 검출되지 않으면 실패다. 판별 규칙은 04와 같은 F.move_style이다.
+    """
+    move_cfg = config["movement"]
+    centers, scales, _, wf = trimmed_tracks(clip, movement, trim_windows)
+    rest = move_cfg.get("rest_displacement_ratio")
+    if rest is None:
+        return {"style": "판별 불가(rest_displacement_ratio 없음)", "one_way_trials": 0,
+                "one_way_correct": 0, "one_way_firsts": ""}
+    style = F.move_style(centers, scales, wf, float(rest),
+                         float(move_cfg["min_displacement_ratio"]))
+    if not style.is_flick:
+        return {"style": style.reason, "one_way_trials": 0, "one_way_correct": 0,
+                "one_way_firsts": ""}
+    firsts = []
+    previous_end = 0
+    for _, end in style.one_way_bouts():
+        # 직전 복귀 정지부터 센다. 획을 처음 잡는 윈도우는 '이탈'로 판정된 윈도우보다
+        # 조금 앞에서 시작할 수 있다. 그 사이 손은 출발점에 멈춰 있으므로 다른 획이 없다.
+        inside = [e for e in events if previous_end <= e["window"] < end]
+        firsts.append(inside[0]["label"] if inside else NONE)
+        previous_end = end
+    return {"style": "튕기는 방식", "one_way_trials": len(firsts),
+            "one_way_correct": sum(f == clip.meta.action for f in firsts),
+            "one_way_firsts": ", ".join(f.replace("MOVE_", "") for f in firsts)}
 
 
 def main() -> int:
@@ -122,21 +160,30 @@ def main() -> int:
             continue
         events = detect_move_events(clip, movement, trim)
         counts = pd.Series([e["label"] for e in events]).value_counts()
-        move_rows.append({
+        row = {
             "stem": clip.meta.stem, "action": clip.meta.action,
             "condition": clip.meta.condition or "none",
             "events_total": len(events),
             "events_correct": int(counts.get(clip.meta.action, 0)),
             "events_wrong": int(len(events) - counts.get(clip.meta.action, 0)),
             "labels": ", ".join(f"{k}×{v}" for k, v in counts.items()) or "(없음)",
-        })
+        }
+        if clip.meta.action in MOVE_ACTIONS:
+            row.update(evaluate_one_way(clip, events, movement, config, trim))
+        move_rows.append(row)
     moves = pd.DataFrame(move_rows)
     moves.to_csv(report_dir / "validate_movement.csv", index=False, encoding="utf-8-sig")
 
+    move_only = moves[moves.action.isin(MOVE_ACTIONS)].astype(
+        {"one_way_trials": int, "one_way_correct": int})
     print()
     print("=" * 78)
-    print("이동 검출 (왕복 3회 = 라벨 방향으로 3회 검출되어야 함)")
+    print("이동 검출 — 편도 (튕기는 방식 영상의 '정지 -> 이동 -> 제자리 정지'마다 첫 검출 방향)")
     print("=" * 78)
+    print(move_only[["stem", "style", "one_way_trials", "one_way_correct",
+                     "one_way_firsts"]].to_string(index=False))
+    print()
+    print("참고: 검출 사건 전체 (파일럿 촬영의 왕복 횟수 기준, 목표 아님)")
     print(moves[["stem", "events_total", "events_correct", "labels"]].to_string(index=False))
 
     # ---------------------------------------------------------- 목표 대비
@@ -166,12 +213,15 @@ def main() -> int:
                         f"< {targets['twofingers_false_accept_max'] * 100:.0f}%",
                         leak < targets["twofingers_false_accept_max"]))
 
-    move_clips = moves[moves.action.isin(MOVE_ACTIONS)]
-    worst = int(move_clips.events_correct.min()) if not move_clips.empty else 0
-    ok_clips = int((move_clips.events_correct >= targets["move_strokes_required"]).sum())
-    results.append((f"MOVE_* 왕복 3회 검출 ({ok_clips}/{len(move_clips)}영상)",
-                    f"최소 {worst}회", f">= {targets['move_strokes_required']}회",
-                    ok_clips == len(move_clips)))
+    flick_clips = move_only[move_only.style == "튕기는 방식"]
+    trials = int(flick_clips.one_way_trials.sum()) if not flick_clips.empty else 0
+    correct = int(flick_clips.one_way_correct.sum()) if not flick_clips.empty else 0
+    share = correct / trials if trials else float("nan")
+    minimum = targets["move_one_way_correct_min"]
+    results.append((f"MOVE_* 편도 첫 검출 방향 ({correct}/{trials}회, "
+                    f"튕기는 방식 {len(flick_clips)}/{len(move_only)}영상)",
+                    f"{share * 100:.1f}%", f">= {minimum * 100:.0f}%",
+                    bool(trials) and share >= minimum))
 
     shake = moves[moves.action == "NEG_shake"]
     shake_events = int(shake.events_total.sum()) if not shake.empty else 0

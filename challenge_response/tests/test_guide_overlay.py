@@ -132,3 +132,48 @@ def test_next_actions_strip_marks_the_current_step():
     canvas = np.zeros((480, 640, 3), np.uint8)
     G.draw_next_actions(canvas, actions, 1, BASE_CONFIG)
     assert np.any(np.all(canvas == (60, 200, 240), axis=2))
+
+
+# ---------------------------------------------------------------- 가장자리 경고
+
+def _hand_at(cx, cy, size=0.1):
+    """정규화 좌표 (cx, cy) 근처에 손목(0)과 중지 MCP(9)를 둔 21점 손."""
+    lm = np.zeros((21, 3))
+    lm[:, 0], lm[:, 1] = cx, cy
+    lm[0, 1] = cy + size / 2      # 손목
+    lm[9, 1] = cy - size / 2      # 중지 MCP
+    return lm
+
+
+def test_centred_hand_has_no_edge_warning():
+    assert G.edge_sides(_hand_at(0.5, 0.5), 640, 480) == []
+
+
+def test_hand_near_top_and_bottom():
+    assert G.edge_sides(_hand_at(0.5, 0.04), 640, 480) == ["top"]
+    assert G.edge_sides(_hand_at(0.5, 0.96), 640, 480) == ["bottom"]
+
+
+def test_left_right_follow_the_mirrored_screen():
+    """원본 x가 작으면(카메라 기준 왼쪽) 거울 화면에서는 오른쪽이다."""
+    assert G.edge_sides(_hand_at(0.005, 0.5), 640, 480) == ["right"]
+    assert G.edge_sides(_hand_at(0.995, 0.5), 640, 480) == ["left"]
+
+
+def test_default_margin_is_a_quarter_hand():
+    """손 크기 1/4보다 멀면 경고하지 않는다 (1.0이면 이동 프레임 93%에서 켜졌다)."""
+    size = 0.1                                     # 손 크기 48px @ 480
+    half_hand_away = 0.5 * size * 480 / 480 + size / 2   # 윤곽 위끝이 손 크기 절반만큼 떨어짐
+    assert G.edge_sides(_hand_at(0.5, half_hand_away, size), 640, 480) == []
+    tenth_hand_away = 0.1 * size + size / 2
+    assert G.edge_sides(_hand_at(0.5, tenth_hand_away, size), 640, 480) == ["top"]
+
+
+def test_margin_scales_with_hand_size():
+    """같은 위치라도 손이 크게(가깝게) 찍히면 여유가 더 필요하다."""
+    assert G.edge_sides(_hand_at(0.5, 0.2, size=0.05), 640, 480) == []
+    assert G.edge_sides(_hand_at(0.5, 0.2, size=0.3), 640, 480) == ["top"]
+
+
+def test_missing_landmarks_give_no_warning():
+    assert G.edge_sides(np.full((21, 3), np.nan), 640, 480) == []

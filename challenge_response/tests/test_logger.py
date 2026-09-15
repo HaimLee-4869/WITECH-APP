@@ -125,3 +125,55 @@ def test_frame_counts_are_recorded(recorder, tmp_path):
     row = read_rows(csv_path)[0]
     assert row["frames"] == "3"
     assert row["detected_frames"] == "2"
+
+
+# ---------------------------------------------------------------- 실행 로그 텍스트
+
+def _machine(config):
+    from core.challenge_state_machine import ChallengeStateMachine
+    from core.hand_action_detector import HandActionDetector
+    from core.movement_detector import MovementDetector
+    from tests.test_state_machine import CONFIG
+    config = {**CONFIG, **config}
+    challenge = Challenge(challenge_id="x", actions=["FIST", "MOVE_LEFT", "INDEX"],
+                          created_at="now")
+    machine = ChallengeStateMachine(config, challenge, HandActionDetector(config),
+                                    MovementDetector(config), 30.0)
+    return config, machine
+
+
+def test_threshold_report_reads_the_live_detectors():
+    """config가 아니라 판정기 객체 값을 보여줘야 로드 실패를 잡을 수 있다."""
+    from core.challenge_logger import threshold_report_lines
+    config, machine = _machine({"fist_max_tip_wrist_ratio": 0.909})
+    text = "\n".join(threshold_report_lines(config, machine.shape_detector,
+                                            machine.movement_detector, machine))
+    assert "단계 2000ms" in text
+    assert "0.909" in text
+    assert f"{machine.movement_detector.min_displacement_ratio:.3f}" in text
+
+
+def test_threshold_report_shows_disabled_fist_gate():
+    from core.challenge_logger import threshold_report_lines
+    config, machine = _machine({})
+    text = "\n".join(threshold_report_lines(config, machine.shape_detector,
+                                            machine.movement_detector, machine))
+    assert "꺼짐(null)" in text
+
+
+def test_attempt_report_has_actions_steps_reason_and_move_diagnostics(recorder):
+    from core.challenge_logger import attempt_report_lines
+    from core.challenge_state_machine import MoveStats
+    status = fail_status(recorder.challenge, FailReason.WRONG_DIRECTION)
+    move = MoveStats(windows=10, displacement_pass=4, axis_pass=1,
+                     axis_counts={"x": 7}, displacements=[0.1, 0.5],
+                     axis_ratios=[2.0, 5.0])
+    status.steps[1].move = move
+    text = "\n".join(attempt_report_lines(recorder, status, 4321.0, attempt_no=7))
+    assert "[시도 7] FAIL" in text
+    assert "WRONG_DIRECTION" in text
+    assert "OPEN_PALM -> MOVE_LEFT -> FIST" in text
+    assert "1단계 OPEN_PALM" in text and "통과" in text
+    assert "미도달" in text
+    assert "변위비 최대 0.5000" in text and "축비 최대 5.0000" in text
+    assert "4321ms" in text

@@ -33,6 +33,7 @@ class ShapeResult:
     flags: tuple[bool, ...]      # FINGER_NAMES 순서 (엄지 포함)
     angles: tuple[float, ...]    # FINGER_NAMES 순서
     margins: tuple[float, ...]   # 임계값과의 여유(도)
+    tip_wrist_ratio: float = float("nan")  # 손끝-손목 거리 / 손 크기 (FIST 게이트)
 
 
 class HandActionDetector:
@@ -44,6 +45,11 @@ class HandActionDetector:
         self.other_threshold = float(angle_cfg["others"])
         self.angle_space = str(config["angle_space"])
         self.confidence_margin_deg = float(config["shape_confidence_margin_deg"])
+        # FIST 패턴이어도 손끝이 손목에서 이 비율 이상 떨어져 있으면 반쯤 쥔 손으로
+        # 보고 UNKNOWN. null(도출 실패)이거나 없으면 게이트를 걸지 않는다.
+        # OPEN_PALM 쪽에는 걸지 않는다 (README 5.1).
+        gate = config.get("fist_max_tip_wrist_ratio")
+        self.fist_max_tip_wrist_ratio = float(gate) if gate is not None else None
 
     def prepare(self, landmarks: np.ndarray, width: int | None = None,
                 height: int | None = None) -> np.ndarray:
@@ -74,6 +80,12 @@ class HandActionDetector:
         pattern = tuple(flags[i] for i in idx)
         label = next((name for name, p in SHAPE_PATTERNS.items() if p == pattern), UNKNOWN)
 
+        tip_wrist = g.fingertip_wrist_ratio(coords)
+        if label == "FIST" and self.fist_max_tip_wrist_ratio is not None:
+            # 손끝 거리를 못 재면 반쯤 쥔 손인지 확인할 수 없으므로 FIST로 인정하지 않는다.
+            if not np.isfinite(tip_wrist) or tip_wrist >= self.fist_max_tip_wrist_ratio:
+                label = UNKNOWN
+
         # 신뢰도: 판정에 쓰인 4손가락이 임계값에서 얼마나 확실히 떨어져 있는지.
         # 가장 아슬아슬한 손가락이 전체 신뢰도를 결정한다.
         scale = self.confidence_margin_deg
@@ -83,7 +95,7 @@ class HandActionDetector:
 
         return ShapeResult(label=label, confidence=confidence,
                            flags=tuple(flags), angles=tuple(float(a) for a in angles),
-                           margins=tuple(margins))
+                           margins=tuple(margins), tip_wrist_ratio=tip_wrist)
 
     def detect_from_clip(self, clip, frame_index: int) -> ShapeResult:
         """캐시된 영상의 한 프레임을 판정한다 (05_validate_rules.py용)."""

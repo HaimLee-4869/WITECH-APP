@@ -2,28 +2,32 @@
   "_generated_by": "scripts/04_derive_thresholds.py",
   "_note": "모든 임계값은 촬영 영상의 실측 분포에서 나왔다. _source가 없는 값은 없다. null은 분포가 겹쳐 도출하지 못한 값이다.",
   "angle_space": "image_iso",
-  "_source_angle_space": "extended/curled 분리폭 비교: image_iso=67.1도, world=45.5도",
+  "_source_angle_space": "extended/curled 분리폭 비교: image_iso=61.0도, world=49.9도",
   "finger_extended_angle": {
-    "thumb": 145.2,
-    "others": 132.6,
+    "thumb": 148.9,
+    "others": 135.9,
     "_source": {
-      "others": "OPEN_PALM/INDEX/TWO_FINGERS의 펴야 하는 손가락 p5=166.1도 / FIST 등 접어야 하는 손가락 p95=99.0도 (틈=67.1도)",
-      "thumb": "OPEN_PALM 엄지 p5=151.1도 / FIST 엄지 p95=139.3도 (틈=11.8도)"
+      "others": "OPEN_PALM/INDEX/TWO_FINGERS의 펴야 하는 손가락 p5=166.4도 / FIST 등 접어야 하는 손가락 p95=105.5도 (틈=61.0도)",
+      "thumb": "OPEN_PALM 엄지 p5=154.5도 / FIST 엄지 p95=143.4도 (틈=11.1도)"
     }
   },
-  "shape_hold_frames": 9,
-  "_source_shape_hold_frames": "NEG_threefingers, NEG_indexring, NEG_indexpinky 영상의 오검출 연속길이 p95=7.8프레임 +1, 하한 3 / 정상 영상 정답 연속길이 p5=15.5프레임 (제외: NEG_halffist)",
-  "shape_confidence_margin_deg": 33.5,
-  "_source_shape_confidence_margin_deg": "펴짐/접힘 분포 틈 67.1도의 절반",
+  "fist_max_tip_wrist_ratio": 0.909,
+  "_source_fist_max_tip_wrist_ratio": "FIST 정답 프레임의 손끝-손목 거리/손 크기 p95=0.835 / 각도 규칙으로 FIST가 된 NEG_halffist 프레임 p5=0.983 (854프레임, 틈=0.148). 적용 시 NEG_halffist->FIST 72.0%->0.6% (참가자별 최대 P01 2.7%), FIST 정답 프레임 유지 100.0%. 주의: 같은 영상으로 임계값을 정하고 평가한 수치라 낙관적이다. 새 참가자에서는 더 샐 수 있다. OPEN_PALM 쪽에는 걸지 않는다(정책 결정, README 5.1).",
+  "frame_reference_fps": 30.0,
+  "_source_frame_reference_fps": "파일럿 영상 fps 중앙값 (130개 영상, 범위 29.85~30.03). shape_hold_frames·escape_frames·max_lost_frames와 이동 윈도우 프레임 수는 이 fps의 영상에서 센 값이다. 실시간은 fps가 다르므로(웹캠 약 20fps) 이 fps 기준 시간으로 바꿔 판정한다. 측정값이지만 판정 임계값은 아니다.",
+  "shape_hold_frames": 7,
+  "_source_shape_hold_frames": "NEG_threefingers, NEG_indexring, NEG_indexpinky 영상의 오검출 연속길이 p95=5.9프레임 +1, 하한 3 / 정상 영상 정답 연속길이 p5=5.8프레임 (제외: NEG_halffist)",
+  "shape_confidence_margin_deg": 30.5,
+  "_source_shape_confidence_margin_deg": "펴짐/접힘 분포 틈 61.0도의 절반",
   "shape_confidence_min": null,
-  "_source_shape_confidence_min": "정상 영상 정답 프레임 신뢰도 p5=0.811 / NEG 오검출 프레임 신뢰도 p95=0.897 (16프레임)",
-  "escape_frames": 13,
-  "_source_escape_frames": "손 모양 영상에서 라벨이 정답과 다른 구간(오검출 잡음)의 길이 관측된 최대치 12프레임 +1, 하한 3 (구간 14개, p50=1, p95=8.1, 최대 12프레임). 다른 임계값과 달리 negative_percentile을 쓰지 않는다. 이탈 관문은 보안 관문이라 잡음 구간 하나만 관문을 열어도 그 시도의 방어가 무력해진다. p95=8.1로 잡으면 관측된 1개 구간이 관문을 열 수 있다. 정상적인 손 모양 변경에 걸리는 시간은 파일럿 영상으로 잴 수 없어 근거에 넣지 못했다.",
+  "_source_shape_confidence_min": "정상 영상 정답 프레임 신뢰도 p5=0.824 / NEG 오검출 프레임 신뢰도 p95=0.918 (12프레임)",
+  "escape_frames": 14,
+  "_source_escape_frames": "손 모양 영상에서 라벨이 정답과 다른 구간(오검출 잡음)의 길이 관측된 최대치 13프레임 +1, 하한 3 (구간 28개, p50=3, p95=13.0, 최대 13프레임). 다른 임계값과 달리 negative_percentile을 쓰지 않는다. 이탈 관문은 보안 관문이라 잡음 구간 하나만 관문을 열어도 그 시도의 방어가 무력해진다. p95=13.0로 잡으면 관측된 0개 구간이 관문을 열 수 있다. 정상적인 손 모양 변경에 걸리는 시간은 파일럿 영상으로 잴 수 없어 근거에 넣지 못했다.",
   "movement": {
-    "window_ms": 500,
-    "min_displacement_ratio": 0.169,
-    "axis_dominance_ratio": 4.194,
-    "max_duration_ms": 2000,
+    "window_ms": 600,
+    "min_displacement_ratio": 0.226,
+    "axis_dominance_ratio": 3.634,
+    "max_duration_ms": 2500,
     "direction_map": {
       "MOVE_LEFT": [
         "x",
@@ -42,40 +46,49 @@
         1
       ]
     },
+    "rest_displacement_ratio": 0.086,
     "_source": {
-      "window_ms": "MOVE 영상 획 1회 소요시간(주축 궤적의 평균선 교차 횟수로 측정) p5=524ms에 가장 가까운 격자값. 가장 빠른 획 안에 윈도우가 들어가야 한다.",
-      "min_displacement_ratio": "MOVE 영상별 p75 변위의 p5=0.280 / NEG_shake 윈도우 p95=0.057 (window=500ms, 진입·이탈 1윈도우 제외, 틈=0.223)",
-      "axis_dominance_ratio": "MOVE 획 구간 주축비 p5=5.34 / NEG_diagonal 획 구간 주축비 p95=3.05 (틈=2.30)",
-      "max_duration_ms": "획 1회 소요시간 p95=1915ms (16개 영상, 500ms 단위 올림)",
-      "direction_map": "각 영상의 첫 획 방향: MOVE_LEFT->x-1(4/4영상 일치), MOVE_RIGHT->x+1(4/4영상 일치), MOVE_UP->y-1(4/4영상 일치), MOVE_DOWN->y+1(4/4영상 일치)",
-      "excluded_clips": "제외한 영상 없음"
+      "window_ms": "MOVE 영상 획 1회 소요시간(주축 궤적의 평균선 교차 횟수로 측정) p5=608ms에 가장 가까운 격자값. 가장 빠른 획 안에 윈도우가 들어가야 한다.",
+      "min_displacement_ratio": "MOVE 영상별 p75 변위의 p5=0.366 / NEG_shake 윈도우 p95=0.086 (window=600ms, 진입·이탈 1윈도우 제외, 틈=0.280)",
+      "axis_dominance_ratio": "MOVE 획 구간 주축비 p5=4.38 / NEG_diagonal 획 구간 주축비 p95=2.89 (틈=1.48)",
+      "max_duration_ms": "획 1회 소요시간 p95=2042ms (38개 영상, 500ms 단위 올림)",
+      "direction_map": "튕기는 방식 영상의 첫 획 방향: MOVE_LEFT->x-1(4/4영상 일치, P01·P02·P05), MOVE_RIGHT->x+1(5/5영상 일치, P01·P02·P05), MOVE_UP->y-1(2/2영상 일치, P05), MOVE_DOWN->y+1(2/2영상 일치, P05)",
+      "direction_clip_rule": "방향 판정에는 '튕기는 방식' 영상만 쓴다(실시간은 정지 상태에서 편도 1회로 판정하므로 멈춤 없는 왕복 영상은 실사용 조건과 다르다. 2026-09-16 결정). 판별 조건 3개를 모두 만족해야 한다. 새 임계값은 없고 04가 도출한 값만 쓴다. (1) 정지 상태로 시작: 진입 구간을 자른 뒤 첫 600ms 윈도우의 변위가 NEG_shake 윈도우 p95=0.086(제자리 흔들림 수준) 미만. (2) 한쪽으로만 이동: 주축에서 출발점(첫 윈도우 평균 위치) 반대편으로 min_displacement_ratio=0.226 이상 넘어간 적이 없음. (3) 제자리 복귀: 출발점에서 주축으로 min_displacement_ratio 이상 떠났다가, 변위가 NEG_shake p95 미만인 윈도우 전체가 출발점 그 거리 안으로 돌아온 적이 1회 이상. 주의: 이 조건들은 파일럿 영상의 판별 결과를 보면서 세 차례 고쳐 정했다(정지 판정을 min_displacement_ratio에서 NEG_shake p95로, 복귀 판정을 2D 거리에서 주축 거리로). 같은 데이터로 규칙을 정하고 적용했다는 뜻이다.",
+      "direction_excluded_clips": "방향 판정에서 뺀 MOVE 영상 27개 (reports/direction_votes.csv): P01_MOVE_DOWN_far_01(정지 상태로 시작하지 않음), P01_MOVE_DOWN_near_01(출발점 양쪽으로 이동(반대편 0.53)), P01_MOVE_LEFT_near_01(정지 상태로 시작하지 않음), P01_MOVE_RIGHT_far_01(정지 상태로 시작하지 않음), P01_MOVE_UP_far_01(정지 상태로 시작하지 않음), P01_MOVE_UP_near_01(정지 상태로 시작하지 않음), P02_MOVE_DOWN_far_01(출발점 양쪽으로 이동(반대편 0.37)), P02_MOVE_DOWN_near_01(정지 상태로 시작하지 않음), P02_MOVE_LEFT_far_01(정지 상태로 시작하지 않음), P02_MOVE_UP_far_01(정지 상태로 시작하지 않음), P02_MOVE_UP_near_01(정지 상태로 시작하지 않음), P03_MOVE_DOWN_far_01(정지 상태로 시작하지 않음), P03_MOVE_DOWN_near_01(정지 상태로 시작하지 않음), P03_MOVE_LEFT_far_01(통계 제외(축비)), P03_MOVE_LEFT_near_01(통계 제외(축비)), P03_MOVE_RIGHT_far_01(통계 제외(축비)), P03_MOVE_RIGHT_near_01(통계 제외(축비)), P03_MOVE_UP_far_01(출발점 양쪽으로 이동(반대편 0.32)), P03_MOVE_UP_near_01(출발점 양쪽으로 이동(반대편 0.58)), P04_MOVE_DOWN_far_01(정지 상태로 시작하지 않음), P04_MOVE_DOWN_near_01(정지 상태로 시작하지 않음), P04_MOVE_LEFT_far_01(정지 상태로 시작하지 않음), P04_MOVE_LEFT_near_01(정지 상태로 시작하지 않음), P04_MOVE_RIGHT_far_01(정지 상태로 시작하지 않음), P04_MOVE_RIGHT_near_01(정지 상태로 시작하지 않음), P04_MOVE_UP_far_01(정지 상태로 시작하지 않음), P04_MOVE_UP_near_01(정지 상태로 시작하지 않음)",
+      "rest_displacement_ratio": "NEG_shake 윈도우 p95=0.086 (window=600ms). 촬영 방식 판별(04 direction_map, 05 편도 검증)에만 쓴다. 실시간 판정에는 쓰지 않는다.",
+      "excluded_clips": "NEG_diagonal 최대 축비 2.20 이하이거나 기대 축과 다른 MOVE 영상 4개 제외: P03_MOVE_LEFT_far_01(축비 1.81, 관측 x축), P03_MOVE_LEFT_near_01(축비 1.2, 관측 x축), P03_MOVE_RIGHT_far_01(축비 2.0, 관측 x축), P03_MOVE_RIGHT_near_01(축비 1.95, 관측 x축)"
     }
   },
   "timing": {
-    "per_action_timeout_ms": 2500,
-    "total_timeout_ms": 7500,
+    "per_action_timeout_ms": 2000,
+    "total_timeout_ms": 6000,
     "max_retries": 1,
     "_source": {
-      "per_action_timeout_ms": "손 모양 영상에서 9프레임 연속 정답까지 걸린 시간과 이동 획 1회 시간의 p95=2120ms (23건, 500ms 단위 올림)",
+      "per_action_timeout_ms": "손 모양 영상에서 손이 처음 검출된 뒤 7프레임 연속 정답까지 걸린 시간(60건, p50=233ms, p95=234ms)과 MOVE 영상별 획 1회 소요시간(38건, p50=1352ms, p95=2042ms)을 합친 p95=1831ms (98건, 500ms 단위 올림). 요청을 읽고 반응하는 시간은 파일럿 영상으로 잴 수 없어 들어가지 않았다.",
       "total_timeout_ms": "per_action_timeout_ms × 단계 수 3",
       "max_retries": "측정값 아님. 재시도 횟수는 분포에서 나오는 값이 아니라 프로토콜 정책이다. 측정값이 아님을 config _source에 명시한다."
     }
   },
   "tracking": {
     "max_lost_frames": 38,
-    "min_detection_score": 0.857,
+    "min_detection_score": 0.938,
     "_source": {
-      "max_lost_frames": "정상 영상 중간 끊김 p95=9.1프레임 (3건) / NEG_exit 중간 끊김 p5=66.9프레임 (4건, 틈=57.8프레임)",
-      "min_detection_score": "정상 영상 검출 프레임 detection_score p5=0.857 (8216프레임)"
+      "max_lost_frames": "근거 부족으로 도출하지 않음 (정상 영상 중간 끊김 p95=1.0프레임 (1건) / NEG_exit 중간 끊김 p5=22.0프레임 (11건, 틈=21.0프레임)). 임시값 38: 2026-09-16 결정. 근거 부족으로 도출하지 못했을 때 쓰는 임시값. 2명(재촬영 전 P01, P05) 기준 2026-09-07 도출값이며 그 근거도 정상 영상 끊김 3건뿐이었다. 측정값 아님. 실사용 세션으로 다시 재야 한다.",
+      "min_detection_score": "정상 영상 검출 프레임 detection_score p5=0.938 (21885프레임)"
     }
   },
   "coordinate_frame": "mirrored",
   "_source_coordinate_frame": "측정값 아님. SPEC 4.5: 사용자가 화면을 보고 인식하는 방향으로 판정한다. 측정값이 아니라 UX 결정이다.",
   "_unresolved": {
-    "shape_confidence_min": "NEG 오검출 프레임의 신뢰도 p95=0.897가 정답 프레임 p5=0.811 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다."
+    "shape_confidence_min": "NEG 오검출 프레임의 신뢰도 p95=0.918가 정답 프레임 p5=0.824 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다.",
+    "tracking.max_lost_frames": "정상 영상 중간 끊김이 1건뿐이라(최소 20건) p95를 믿을 수 없다. 임시값 38을 쓴다(측정값 아님)."
   },
   "_warnings": [
-    "escape_frames 근거 표본이 14개뿐이다. 실사용 세션이 쌓이면 다시 재야 한다.",
-    "shape_confidence_min: NEG 오검출 프레임의 신뢰도 p95=0.897가 정답 프레임 p5=0.811 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다."
+    "shape_hold_frames=7이 정상 영상의 정답 연속길이 p5=5.8보다 길다. 정상 사용자가 유지 조건을 못 채울 수 있다.",
+    "escape_frames 근거 표본이 28개뿐이다. 실사용 세션이 쌓이면 다시 재야 한다.",
+    "shape_confidence_min: NEG 오검출 프레임의 신뢰도 p95=0.918가 정답 프레임 p5=0.824 이상이다. 신뢰도로 경계 케이스를 더 걸러낼 수 없다.",
+    "MOVE 영상 제외: P03_MOVE_LEFT_near_01 — 영상 축비 1.49(NEG_diagonal 최대 1.96 이하), 관측 주축 x / 기대 x",
+    "MOVE 영상 제외: P03_MOVE_RIGHT_near_01 — 영상 축비 1.95(NEG_diagonal 최대 1.96 이하), 관측 주축 x / 기대 x",
+    "tracking.max_lost_frames: 정상 영상 중간 끊김이 1건뿐이라(최소 20건) p95를 믿을 수 없다. 임시값 38을 쓴다(측정값 아님)."
   ]
 }

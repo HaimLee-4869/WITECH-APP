@@ -96,7 +96,8 @@ def extract_clip(video_path: Path, meta: ClipMeta, mp_settings: dict) -> dict:
     if not cap.isOpened():
         raise RuntimeError(f"영상을 열 수 없음: {video_path}")
 
-    # 촬영 영상은 컨테이너 회전 메타데이터를 갖고 있는데(P01=90도, P05=270도)
+    # 촬영 영상은 컨테이너 회전 메타데이터를 갖고 있는데
+    # (P01=270도, P02=90도, P03=90도, P04=90도, P05=270도, P02 재촬영 MOVE_LEFT/RIGHT는 0도)
     # OpenCV는 기본적으로 이를 적용하지 않는다. 끄고 읽으면 손이 옆으로 누운
     # 프레임이 나와서 (1) MediaPipe 검출률이 떨어지고 (2) 상하/좌우 이동 축이
     # 통째로 뒤바뀐다. 반드시 켠 채로 읽는다.

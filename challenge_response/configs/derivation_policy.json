@@ -53,12 +53,19 @@
     "shape_correct_min": 0.9,
     "halffist_false_accept_max": 0.05,
     "twofingers_false_accept_max": 0.05,
-    "move_strokes_required": 3,
+    "move_one_way_correct_min": 1.0,
+    "move_one_way_note": "2026-09-16 변경. 예전 목표 '왕복 3회 검출'은 파일럿 촬영 방식을 전제로 해서 실사용(정지 상태에서 편도 1회)과 맞지 않았다. 튕기는 방식 영상의 '정지 -> 한 방향 -> 제자리 정지'마다 처음 검출된 방향이 라벨과 같아야 한다. 전부(100%) 맞아야 달성.",
     "shake_detections_max": 0,
     "diagonal_confirmed_max": 0.2
   },
   "escape_frames_min": 3,
   "escape_frames_note": "단계 전환 시 이전 손 모양에서 '벗어났다'고 인정하는 연속 프레임 수. 손 모양을 유지하는 동안 발생하는 오검출 구간보다 길어야 잡음으로 관문이 열리지 않는다.",
   "escape_frames_basis": "max",
-  "escape_frames_basis_note": "이 항목만 negative_percentile을 쓰지 않고 관측된 오검출 구간의 최대치를 쓴다. 다른 임계값은 사용성 기준이라 드물게 어긋나도 재시도로 회복되지만, 이탈 관문은 보안 관문이라 잡음 구간 하나만 관문을 열어도 그 시도의 방어가 무력해진다. 'max'는 최대치+1, 'percentile'은 negative_percentile+1."
+  "fist_tip_wrist_gate": true,
+  "fist_tip_wrist_gate_note": "2026-09-16 결정. NEG_halffist가 FIST로 새는 것을 손끝-손목 거리/손 크기로 막는다. FIST 쪽에만 건다. OPEN_PALM 쪽은 5명 탐색에서 정상 OPEN_PALM 정답률이 99.9%->89.4%로 떨어져 적용하지 않고 README 5.1의 '수용'을 유지한다. 임계값은 FIST 정답 프레임 p95와 FIST로 판정된 NEG_halffist 프레임 p5 사이에서 뽑는다(작을수록 정상이라 백분위 방향이 반대). 같은 영상으로 기준을 정하고 평가하므로 05의 halffist 수치는 낙관적이다.",
+  "lost_frames_min_samples": 20,
+  "lost_frames_min_samples_note": "정상 영상 중간 끊김이 이 개수보다 적으면 p95가 최대치와 구분되지 않아 max_lost_frames를 도출하지 않고 _unresolved에 기록한다. 측정값 아님.",
+  "max_lost_frames_provisional": 38,
+  "max_lost_frames_provisional_note": "2026-09-16 결정. 근거 부족으로 도출하지 못했을 때 쓰는 임시값. 2명(재촬영 전 P01, P05) 기준 2026-09-07 도출값이며 그 근거도 정상 영상 끊김 3건뿐이었다. 측정값 아님. 실사용 세션으로 다시 재야 한다.",
+  "escape_frames_basis_note":"이 항목만 negative_percentile을 쓰지 않고 관측된 오검출 구간의 최대치를 쓴다. 다른 임계값은 사용성 기준이라 드물게 어긋나도 재시도로 회복되지만, 이탈 관문은 보안 관문이라 잡음 구간 하나만 관문을 열어도 그 시도의 방어가 무력해진다. 'max'는 최대치+1, 'percentile'은 negative_percentile+1."
 }
