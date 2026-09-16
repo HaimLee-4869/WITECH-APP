@@ -4,7 +4,6 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:signid/challenge/challenge_config.dart';
 import 'package:signid/challenge/geometry.dart';
 import 'package:signid/challenge/hand_action_detector.dart';
 

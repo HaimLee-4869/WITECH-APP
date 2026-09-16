@@ -26,7 +26,7 @@ ChallengeConfig moveConfig({
         'minDisplacementRatio': 1.2,
         'axisDominanceRatio': 2.0,
         'maxDurationMs': 2500,
-        if (directionMap != null) 'directionMap': directionMap,
+        'directionMap': ?directionMap,
       },
     });
 
