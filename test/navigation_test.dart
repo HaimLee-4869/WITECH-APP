@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:signid/models/app_user.dart';
 import 'package:signid/core/theme.dart';
 import 'package:signid/models/auth_log.dart';
 import 'package:signid/models/enroll.dart';
@@ -20,6 +21,20 @@ import 'test_helpers.dart';
 class _InstantApi implements ApiClient {
   @override
   Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
+
+  @override
+  Future<AppUser> createUser({
+    required String id,
+    required String name,
+    String? department,
+  }) async => AppUser(id: id, name: name, department: department);
+
+  @override
+  Future<List<AppUser>> fetchUsers() async => const [
+    AppUser(id: 'hong', name: '홍길동', department: '개발팀'),
+    AppUser(id: 'kim', name: '김길동', department: '인사팀'),
+    AppUser(id: 'oh', name: '오박사', department: '영업팀'),
+  ];
 
   @override
   Future<VerifyResponse> verify(_) async => const VerifyResponse(
@@ -94,6 +109,7 @@ void main() {
 
   testWidgets('홈에서 인증 화면으로 이동한다', (tester) async {
     await tester.pumpWidget(_app());
+    await tester.pump(); // GET /users 응답 반영
     expect(find.byType(HomeScreen), findsOneWidget);
     expect(find.text('Sign-ID'), findsOneWidget);
 
@@ -109,6 +125,7 @@ void main() {
 
   testWidgets('홈에서 등록 화면으로 이동한다', (tester) async {
     await tester.pumpWidget(_app());
+    await tester.pump(); // GET /users 응답 반영
     await tester.tap(find.text('제스처 등록'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
@@ -119,6 +136,7 @@ void main() {
 
   testWidgets('홈에서 관리자 화면으로 이동하고 표와 차트가 렌더링된다', (tester) async {
     await tester.pumpWidget(_app());
+    await tester.pump(); // GET /users 응답 반영
     await tester.tap(find.text('인증 이력'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
@@ -143,6 +161,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('월별 차트 라벨이 실제 월 이름으로 나온다 (0월~4월 아님)', (tester) async {
+    await tester.pumpWidget(_app());
+    await tester.tap(find.text('인증 이력'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 800));
+
+    // 서버는 'YYYY-MM'을 주고 화면은 '1월'~'12월'로 보여준다.
+    expect(find.text('1월'), findsWidgets);
+    expect(find.text('5월'), findsWidgets);
+    // X값(순번)을 그대로 쓰면 0월이 생긴다.
+    expect(find.text('0월'), findsNothing);
+  });
+
   testWidgets('결과 화면은 성공/실패를 다르게 보여준다', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -151,7 +182,9 @@ void main() {
           home: const ResultScreen(
             response: VerifyResponse(
               score: 0.88,
-              threshold: 0.72,
+              threshold: 0.34,
+              gestureScore: 0.97,
+              gestureThreshold: 0.90,
               passed: true,
               latencyMs: 1200,
             ),
@@ -160,8 +193,9 @@ void main() {
       ),
     );
     expect(find.text('인증되었습니다'), findsOneWidget);
-    // threshold는 응답에서 읽은 값이 그대로 보여야 한다.
-    expect(find.text('기준 0.72'), findsOneWidget);
+    // threshold는 응답에서 읽은 값이 그대로 보여야 한다. dual-head는 관문이 둘이다.
+    expect(find.text('본인 0.880 / 0.34'), findsOneWidget);
+    expect(find.text('동작 0.970 / 0.90'), findsOneWidget);
     // 2.5초 자동 복귀 타이머가 남지 않도록 소진시킨다.
     await tester.pump(const Duration(seconds: 3));
 
@@ -171,23 +205,29 @@ void main() {
           theme: buildAppTheme(),
           home: const ResultScreen(
             response: VerifyResponse(
-              score: 0.0,
-              threshold: 0.72,
+              score: 0.91,
+              threshold: 0.34,
+              gestureScore: 0.41,
+              gestureThreshold: 0.90,
               passed: false,
               latencyMs: 1200,
-              reason: 'insufficient_frames',
+              reason: 'gesture_gate',   // 본인이지만 등록과 다른 동작
             ),
           ),
         ),
       ),
     );
     expect(find.text('인증에 실패했습니다'), findsOneWidget);
+    // 어느 관문에서 막혔는지 문구로 구분된다.
+    expect(find.textContaining('등록할 때와 같은 수어 동작'), findsOneWidget);
+    expect(find.text('동작 0.410 / 0.90'), findsOneWidget);
     expect(find.text('다시 시도'), findsOneWidget);
     expect(find.text('홈으로'), findsOneWidget);
   });
 
   testWidgets('사용자 드롭다운으로 인증 대상을 바꾼다', (tester) async {
     await tester.pumpWidget(_app());
+    await tester.pump(); // GET /users 응답 반영
     expect(find.text('홍길동'), findsOneWidget);
 
     await tester.tap(find.byType(DropdownButton<String>).first);
@@ -196,5 +236,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('오박사'), findsOneWidget);
+  });
+
+  testWidgets('사용자 목록을 받기 전에는 인증·등록을 시작할 수 없다', (tester) async {
+    await tester.pumpWidget(_app());
+    expect(find.text('사용자 목록을 불러오는 중…'), findsOneWidget);
+
+    await tester.tap(find.text('인증하기'));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(AuthScreen), findsNothing);
+
+    await tester.pump();
+    expect(find.text('홍길동'), findsOneWidget);
   });
 }

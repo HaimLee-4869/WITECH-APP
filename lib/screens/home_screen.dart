@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
 import '../core/theme.dart';
+import '../models/app_user.dart';
 import '../state/providers.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/secondary_button.dart';
 import '../widgets/status_chip.dart';
+import 'add_user_sheet.dart';
 import 'admin_screen.dart';
 import 'auth_screen.dart';
 import 'enroll_screen.dart';
@@ -19,6 +21,7 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final users = ref.watch(usersProvider);
     final selected = ref.watch(selectedUserProvider);
     final gesture = ref.watch(selectedGestureProvider);
     // 앱 시작 시 GET /config를 불러 등록 회차 수 등을 받아온다. (backend/README 4.4)
@@ -41,7 +44,9 @@ class HomeScreen extends ConsumerWidget {
               const Spacer(flex: 2),
               const Text('인증할 사용자', style: AppText.caption),
               const SizedBox(height: 8),
-              _UserDropdown(selected: selected),
+              _UserDropdown(users: users, selected: selected),
+              const SizedBox(height: 8),
+              const _AddUserButton(),
               const SizedBox(height: 16),
               const Text('수어 암호', style: AppText.caption),
               const SizedBox(height: 8),
@@ -49,12 +54,16 @@ class HomeScreen extends ConsumerWidget {
               const SizedBox(height: 32),
               PrimaryButton(
                 label: '인증하기',
-                onPressed: () => _push(context, const AuthScreen()),
+                onPressed: selected == null
+                    ? null
+                    : () => _push(context, const AuthScreen()),
               ),
               const SizedBox(height: 12),
               SecondaryButton(
                 label: '제스처 등록',
-                onPressed: () => _push(context, const EnrollScreen()),
+                onPressed: selected == null
+                    ? null
+                    : () => _push(context, const EnrollScreen()),
               ),
               const SizedBox(height: 12),
               SecondaryButton(
@@ -86,22 +95,81 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-class _UserDropdown extends ConsumerWidget {
-  final String selected;
-
-  const _UserDropdown({required this.selected});
+/// 사용자 추가 진입점.
+///
+/// 실제 서비스라면 회원가입 뒤 제스처를 등록한다. 지금은 로그인이 없어 홈에서
+/// 사용자를 고르는 구조라, 그 사이를 이 버튼이 메운다. 추가하면 바로 선택되고
+/// 제스처 등록으로 이어갈 수 있다.
+class _AddUserButton extends ConsumerWidget {
+  const _AddUserButton();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppShape.cardRadius),
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TextButton.icon(
+        onPressed: () => _addUser(context),
+        icon: const Icon(Icons.person_add_alt, size: 18),
+        label: const Text('사용자 추가'),
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.ring,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+        ),
       ),
-      child: DropdownButtonHideUnderline(
+    );
+  }
+
+  Future<void> _addUser(BuildContext context) async {
+    final created = await AddUserSheet.show(context);
+    if (created == null || !context.mounted) return;
+
+    // 추가 직후 바로 등록으로 이어질 수 있게 안내한다. 자동으로 넘기지는 않는다.
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('${created.name} 추가됨. 수어 암호를 등록해주세요.'),
+          action: SnackBarAction(
+            label: '제스처 등록',
+            onPressed: () => HomeScreen._push(context, const EnrollScreen()),
+          ),
+          duration: const Duration(seconds: 6),
+        ),
+      );
+  }
+}
+
+/// 서버 사용자 목록(`GET /users`)에서 인증 대상을 고른다.
+///
+/// 화면에는 이름을 보여주고, 값(선택 키)은 서버 `users.id`다. 요청에 실리는 것도 id다.
+class _UserDropdown extends ConsumerWidget {
+  final AsyncValue<List<AppUser>> users;
+  final AppUser? selected;
+
+  const _UserDropdown({required this.users, required this.selected});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final list = users.value ?? const <AppUser>[];
+
+    final Widget content;
+    if (users.hasError && list.isEmpty) {
+      content = _UserListMessage(
+        text: '사용자 목록을 불러오지 못했습니다',
+        color: AppColors.danger,
+        onRetry: () => ref.invalidate(usersProvider),
+      );
+    } else if (users.isLoading && list.isEmpty) {
+      content = const _UserListMessage(text: '사용자 목록을 불러오는 중…');
+    } else if (list.isEmpty) {
+      content = _UserListMessage(
+        text: '서버에 등록된 사용자가 없습니다',
+        onRetry: () => ref.invalidate(usersProvider),
+      );
+    } else {
+      content = DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: selected,
+          value: selected?.id,
           isExpanded: true,
           dropdownColor: AppColors.surfaceAlt,
           borderRadius: BorderRadius.circular(AppShape.cardRadius),
@@ -111,15 +179,52 @@ class _UserDropdown extends ConsumerWidget {
             color: AppColors.textSecondary,
           ),
           items: [
-            for (final user in kMockUsers)
-              DropdownMenuItem(value: user, child: Text(user)),
+            for (final user in list)
+              DropdownMenuItem(value: user.id, child: Text(user.name)),
           ],
-          onChanged: (value) {
-            if (value != null) {
-              ref.read(selectedUserProvider.notifier).select(value);
+          onChanged: (id) {
+            if (id != null) {
+              ref.read(selectedUserIdProvider.notifier).select(id);
             }
           },
         ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppShape.cardRadius),
+      ),
+      child: content,
+    );
+  }
+}
+
+class _UserListMessage extends StatelessWidget {
+  final String text;
+  final Color color;
+  final VoidCallback? onRetry;
+
+  const _UserListMessage({
+    required this.text,
+    this.color = AppColors.textSecondary,
+    this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 48,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(text, style: AppText.body.copyWith(color: color)),
+          ),
+          if (onRetry != null)
+            TextButton(onPressed: onRetry, child: const Text('다시 시도')),
+        ],
       ),
     );
   }
