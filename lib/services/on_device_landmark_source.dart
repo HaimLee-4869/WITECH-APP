@@ -162,25 +162,19 @@ class OnDeviceLandmarkSource implements LandmarkSource {
     if (camera == null || !camera.value.isInitialized) return null;
     // 원 안을 꽉 채우도록 cover로 깐다. HandOverlayPainter의 sourceAspectRatio
     // 계산과 같은 규칙이어야 오버레이가 프리뷰 위에 정확히 겹친다.
-    final preview = FittedBox(
+    //
+    // 거울 모드는 **플러그인이 이미 해준다.** camera_android_camerax 0.7.4+6은
+    // 전면 카메라 프리뷰를 좌우 반전해서 그린다(ImageReaderRotatedPreview의
+    // Transform.scale). 여기서 한 번 더 뒤집으면 반전이 상쇄되어 거울이 아니게
+    // 된다 — 이전 코드가 그랬고 SM-A346N 실기기에서 "반전 안 됨"으로 보였다.
+    // 플러그인을 올린 뒤 프리뷰 방향이 바뀌면 여기와 [transform]의 mirror를 함께 볼 것.
+    return FittedBox(
       fit: BoxFit.cover,
       child: SizedBox(
         width: camera.value.previewSize?.height ?? 1,
         height: camera.value.previewSize?.width ?? 1,
         child: CameraPreview(camera),
       ),
-    );
-
-    // 전면 카메라 프리뷰를 거울처럼 좌우 반전한다. (SPEC 8.2)
-    //
-    // Android의 camera 플러그인은 전면 카메라 프리뷰를 반전하지 않고 센서가 보는
-    // 그대로 띄운다. 반면 오버레이는 [transform]의 mirror=true로 반전되므로,
-    // 여기서 프리뷰를 반전하지 않으면 뼈대가 실제 손의 거울상 위치에 그려진다.
-    // (실기기에서 확인한 실제 증상이다.) 둘 다 반전해야 겹친다.
-    return Transform(
-      alignment: Alignment.center,
-      transform: Matrix4.identity()..scaleByDouble(-1.0, 1.0, 1.0, 1.0),
-      child: preview,
     );
   }
 
@@ -197,10 +191,14 @@ class OnDeviceLandmarkSource implements LandmarkSource {
       // (0.245, 0.652)에 있을 때 원좌표는 (0.350, 0.262)였고,
       // (x,y) → (y, 1-x) = 270도 회전이 정확히 겹쳤다.
       rotationDegrees: camera?.description.sensorOrientation ?? 0,
-      // 회전만으로 위치가 맞는다. 여기서 추가로 반전하면 오히려 어긋난다.
-      // 프리뷰 자체는 buildPreview()에서 거울처럼 반전해 띄운다. (SPEC 8.2)
-      // 전송용 좌표는 어느 쪽이든 손대지 않은 원본이다. (SPEC 원칙 A)
-      mirror: false,
+      // 프리뷰가 거울로 보이므로(플러그인이 반전, buildPreview 참고) 오버레이도
+      // 회전 후 좌우 반전해야 실제 손 위에 겹친다. 반전하지 않은 프리뷰에서는
+      // 회전만으로 맞았던 것을 실측했으므로, 거울 프리뷰에는 회전 + 반전이 맞다.
+      //
+      // 이 반전은 화면 그리기 전용이다. MediaPipe 입력과 서버 전송 좌표는
+      // 손대지 않은 원본이다. (SPEC 원칙 A)
+      //   MediaPipe 입력: 원본 / 서버 전송: 원본 / 화면·오버레이: 거울
+      mirror: true,
       // previewSize는 센서 방향 기준(가로)이라 세로 화면에서는 뒤집어 쓴다.
       sourceAspectRatio: preview == null
           ? null
