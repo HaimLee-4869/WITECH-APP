@@ -12,7 +12,7 @@ library;
 /// ```
 ///
 /// 화면/컨트롤러 코드는 손대지 않는다.
-const bool kUseMockApi = true;
+const bool kUseMockApi = false;
 
 /// 백엔드 주소. 코드에 넣지 않고 빌드 시 주입한다. (SPEC 13장)
 ///
@@ -31,11 +31,18 @@ const bool kUseFakeLandmarks = false;
 
 // ─── 캡처 파라미터 ────────────────────────────────────────────────
 
-/// 한 번의 인증에서 동작을 수집하는 시간.
+/// 한 번의 인증에서 동작을 수집하는 시간의 **기본값**.
 ///
-/// 서버 `GET /config`의 `captureDurationMs`가 정답이고 이 값은 응답 전 기본값이다.
-/// 서버 최소 조건은 750ms다. (backend/README 4.1)
-const Duration kRecordDuration = Duration(milliseconds: 2000);
+/// 실제 값은 서버 `GET /config`의 `captureDurationMs`다. 이 상수는 응답을 받기
+/// 전까지만 쓴다. 두 값이 다르면 서버 값이 이긴다.
+///
+/// ⚠️ 이 길이는 AI 모델의 입력 feature 중 하나다(duration). 등록과 인증의 길이가
+/// 다르면 같은 사람·같은 동작이라도 유사도가 크게 떨어진다. 길이를 바꾸면
+/// **기존 등록을 다시 해야 한다.** (backend/README 4.1)
+const Duration kRecordDuration = Duration(milliseconds: kRecordDurationMs);
+
+/// [kRecordDuration]의 ms 값. const 문맥(ServerConfig.fallback)에서 쓴다.
+const int kRecordDurationMs = 4000;
 
 /// 카메라에 요청하는 명목 fps. 서버로 보내는 `nominalFps` 값이기도 하다.
 ///
@@ -43,11 +50,21 @@ const Duration kRecordDuration = Duration(milliseconds: 2000);
 /// 이 값이 아니라 각 프레임의 `tMs`를 기준으로 해야 한다. (SPEC 6장)
 const double kNominalFps = 30.0;
 
-/// 이만큼 연속으로 손이 검출되면 `handSearching` → `handReady`.
-const int kHandReadyFrameThreshold = 10;
+/// 손이 이 시간만큼 **연속으로** 검출되면 `handSearching` → `handReady`.
+///
+/// 프레임 수가 아니라 시간으로 센다. 기기 fps가 명목값(30)과 다르면 프레임 수
+/// 기준은 그대로 어긋난다. 실기기 실측은 13~16fps라, 예전 기준(연속 10프레임)은
+/// 30fps에서 0.33초지만 14fps에서는 0.71초였고, 지터 허용치도 프레임 환산이라
+/// 연속 판정이 계속 끊겼다.
+const Duration kHandReadyDuration = Duration(milliseconds: 400);
 
-/// `recording` 중 이만큼 연속으로 손이 사라지면 수집을 버리고 `handSearching`으로.
-const int kHandLostFrameThreshold = 15;
+/// 프레임 간격이 이보다 벌어지면 연속 검출이 끊긴 것으로 본다.
+///
+/// 13fps면 정상 간격이 77ms다. 두세 프레임 빠지는 정도는 끊김으로 보지 않는다.
+const Duration kHandGapTolerance = Duration(milliseconds: 300);
+
+/// 손이 이 시간 이상 사라지면 수집을 버리고 `handSearching`으로 되돌린다.
+const Duration kHandLostDuration = Duration(milliseconds: 700);
 
 /// 수집된 프레임이 이 개수 미만이면 서버로 보내지 않고 재시도를 안내한다.
 ///
@@ -55,7 +72,9 @@ const int kHandLostFrameThreshold = 15;
 const int kMinFramesForVerify = 20;
 
 /// `handReady`에서 `recording`으로 넘어가기 전 카운트다운 초.
-const int kCountdownSeconds = 3;
+///
+/// 손을 든 뒤 실제 촬영까지 걸리는 시간이 길다는 실기기 피드백으로 3초에서 줄였다.
+const int kCountdownSeconds = 2;
 
 // ─── 등록 파라미터 ────────────────────────────────────────────────
 
@@ -95,13 +114,3 @@ const bool kPluginProvidesHandedness = false;
 
 /// 인증 화면 가이드 원의 지름 = 화면 폭 × 이 비율. (SPEC 8.2)
 const double kCaptureRingDiameterRatio = 0.78;
-
-/// 목 데이터용 사용자 목록. 로그인 대신 홈 화면 드롭다운으로 선택한다.
-const List<String> kMockUsers = <String>[
-  '홍길동',
-  '김길동',
-  '오박사',
-  '둘리',
-  '또치',
-  '고길동',
-];

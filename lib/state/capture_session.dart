@@ -39,25 +39,23 @@ class CaptureSession {
   /// 손을 놓쳐 처음부터 다시 해야 할 때. 세션은 스스로 handSearching으로 돌아간다.
   final void Function(String notice) onAborted;
 
-  /// 명목 프레임 간격(ms).
+  /// 명목 프레임 간격(ms). 녹화 시작 직전의 묵은 프레임을 거르는 데만 쓴다.
   static const double _frameIntervalMs = 1000.0 / kNominalFps;
-
-  /// 지터 허용치. 이보다 적게 비면 연속 검출이 끊긴 것으로 치지 않는다.
-  ///
-  /// 소스는 손이 있을 때만 프레임을 흘리므로 "사라진 프레임"을 직접 셀 수가
-  /// 없다. 그래서 마지막 프레임 이후 흐른 시간을 프레임 수로 환산해서 센다.
-  static const int _jitterToleranceFrames = 2;
 
   static const Duration _watchdogPeriod = Duration(milliseconds: 33);
 
   /// 진행률 아크 갱신 주기. 60fps까지 갈 이유가 없어 20fps로 둔다.
   static const Duration _progressPeriod = Duration(milliseconds: 50);
 
+  /// 한 번의 수집 길이. 서버 `GET /config`의 `captureDurationMs`가 정답이다.
+  final Duration recordDuration;
+
   CaptureSession({
     required this.source,
     required this.onChanged,
     required this.onCaptured,
     required this.onAborted,
+    this.recordDuration = kRecordDuration,
   });
 
   // ─── 외부에서 읽는 상태 ──────────────────────────────────────────
@@ -81,7 +79,10 @@ class CaptureSession {
   final _sinceLastFrame = Stopwatch();
   final _recordClock = Stopwatch();
 
-  int _consecutiveDetected = 0;
+  /// 손이 끊기지 않고 검출되기 시작한 시점부터 흐른 시간.
+  ///
+  /// 프레임 수를 세지 않는다. 기기 fps가 달라도 같은 체감이 되도록 시간으로 센다.
+  final _handContinuous = Stopwatch();
 
   /// 소스를 켜고 프레임 구독을 시작한다. 화면 진입 시 한 번 호출한다.
   Future<void> attach() async {
@@ -98,7 +99,7 @@ class CaptureSession {
   void begin() {
     if (phase != CapturePhase.idle) return;
     _buffer.clear();
-    _consecutiveDetected = 0;
+    _handContinuous.reset();
     phase = CapturePhase.handSearching;
     progress = 0.0;
     countdown = kCountdownSeconds;
@@ -109,7 +110,7 @@ class CaptureSession {
   void cancel() {
     _cancelFlowTimers();
     _buffer.clear();
-    _consecutiveDetected = 0;
+    _handContinuous.reset();
     phase = CapturePhase.idle;
     progress = 0.0;
     countdown = kCountdownSeconds;
@@ -129,10 +130,15 @@ class CaptureSession {
   // ─── 프레임 처리 ────────────────────────────────────────────────
 
   void _onFrame(HandFrame frame) {
+    // 직전 프레임과 너무 벌어졌으면 연속이 끊긴 것으로 보고 다시 센다.
+    if (!_handContinuous.isRunning || _sinceLastFrame.elapsed >= kHandGapTolerance) {
+      _handContinuous
+        ..reset()
+        ..start();
+    }
     _sinceLastFrame
       ..reset()
       ..start();
-    _consecutiveDetected++;
 
     // recording 중에만 버퍼에 쌓는다. 다른 단계의 프레임은 오버레이 표시용이다.
     if (phase == CapturePhase.recording && _isFreshForRecording(frame)) {
@@ -142,7 +148,7 @@ class CaptureSession {
     latestFrame = frame;
 
     if (phase == CapturePhase.handSearching &&
-        _consecutiveDetected >= kHandReadyFrameThreshold) {
+        _handContinuous.elapsed >= kHandReadyDuration) {
       _enterHandReady();
       return;
     }
@@ -156,7 +162,7 @@ class CaptureSession {
   void _onSourceError(Object error) {
     _cancelFlowTimers();
     _buffer.clear();
-    _consecutiveDetected = 0;
+    _handContinuous.reset();
     phase = CapturePhase.idle;
     progress = 0.0;
     countdown = kCountdownSeconds;
@@ -183,15 +189,17 @@ class CaptureSession {
   }
 
   void _onWatchdogTick() {
-    final gapFrames = _sinceLastFrame.elapsedMilliseconds / _frameIntervalMs;
+    final gap = _sinceLastFrame.elapsed;
 
     // 지터 정도로 비었으면 연속 검출이 끊긴 게 아니다.
-    if (gapFrames >= _jitterToleranceFrames) {
-      _consecutiveDetected = 0;
+    if (gap >= kHandGapTolerance) {
+      _handContinuous
+        ..stop()
+        ..reset();
     }
 
     // 손을 오래 놓치면 오버레이에 낡은 뼈대가 남으므로 지운다.
-    if (gapFrames >= kHandLostFrameThreshold && latestFrame != null) {
+    if (gap >= kHandLostDuration && latestFrame != null) {
       latestFrame = null;
       onChanged();
     }
@@ -201,12 +209,12 @@ class CaptureSession {
         // 카운트다운 도중 손이 사라지면 다시 찾는 단계로 되돌린다.
         // SPEC은 recording 중 이탈만 명시하지만, 손이 없는 채로 카운트다운이
         // 끝나 빈 수집이 시작되는 것을 막으려면 여기서도 되돌려야 한다.
-        if (gapFrames >= kHandLostFrameThreshold) {
+        if (gap >= kHandLostDuration) {
           _abort('손이 화면을 벗어났습니다. 손 전체가 원 안에 들어오도록 해주세요.');
         }
       case CapturePhase.recording:
-        // 15프레임 이상 연속으로 사라지면 수집을 버리고 처음부터. (SPEC 8.2)
-        if (gapFrames >= kHandLostFrameThreshold) {
+        // 일정 시간 이상 연속으로 사라지면 수집을 버리고 처음부터. (SPEC 8.2)
+        if (gap >= kHandLostDuration) {
           _abort('손이 화면을 벗어났습니다. 다시 시도해주세요.');
         }
       case CapturePhase.idle:
@@ -249,19 +257,19 @@ class CaptureSession {
 
     _progressTimer = Timer.periodic(_progressPeriod, (_) {
       progress =
-          (_recordClock.elapsedMilliseconds / kRecordDuration.inMilliseconds)
+          (_recordClock.elapsedMilliseconds / recordDuration.inMilliseconds)
               .clamp(0.0, 1.0);
       onChanged();
     });
 
-    _recordTimer = Timer(kRecordDuration, _finishRecording);
+    _recordTimer = Timer(recordDuration, _finishRecording);
   }
 
   void _finishRecording() {
     _cancelFlowTimers();
     final frames = List<HandFrame>.unmodifiable(_buffer);
     _buffer.clear();
-    _consecutiveDetected = 0;
+    _handContinuous.reset();
     phase = CapturePhase.idle;
     progress = 1.0;
     onChanged();
@@ -271,7 +279,7 @@ class CaptureSession {
   void _abort(String notice) {
     _cancelFlowTimers();
     _buffer.clear();
-    _consecutiveDetected = 0;
+    _handContinuous.reset();
     phase = CapturePhase.handSearching;
     progress = 0.0;
     countdown = kCountdownSeconds;

@@ -20,7 +20,11 @@ ACTIVE_MODEL_VERSION = "activeModelVersion"
 DEFAULTS: dict[str, Any] = {
     ENROLLMENT_TAKES: 3,
     ENROLLMENT_GESTURES: 1,  # AI팀 확인 대기 (명세 7장). 1 또는 5.
-    CAPTURE_DURATION_MS: 2000,
+    # 실기기 촬영이 빠듯하다는 피드백으로 2000 → 4000 (2026-09-17).
+    # 학습 분포가 평균 3.29초/표준편차 1.15초라 4초가 중앙에 가깝다(z=+0.6).
+    # ⚠️ 길이는 AI 모델의 입력 feature다. 바꾸면 기존 등록 템플릿이 무효다.
+    #    scripts/clear_enrollments.py로 정리하고 전원 재등록해야 한다.
+    CAPTURE_DURATION_MS: 4000,
     HAND_REQUIRED: "right",
 }
 

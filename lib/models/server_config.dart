@@ -34,7 +34,7 @@ class ServerConfig {
   static const ServerConfig fallback = ServerConfig(
     enrollmentTakes: kDefaultEnrollTakes,
     enrollmentGestures: 1,
-    captureDurationMs: 2000,
+    captureDurationMs: kRecordDurationMs,
     handRequired: 'right',
     modelVersion: 'unknown',
   );
