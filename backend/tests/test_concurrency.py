@@ -53,14 +53,16 @@ def test_parallel_verify_during_threshold_switch(client):
 
     def work(i):
         if i % 5 == 0:
-            return client.post("/admin/threshold", json={"basis": ["eer", "far5", "far1"][i % 3]})
+            return client.post(
+            "/admin/threshold", json={"basis": ["demo_relaxed", "default"][i % 2]}
+        )
         return post_json(client, "/verify", verify_body("kim", 0, gesture_id=GESTURE))
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(work, range(40)))
     assert all(r.status_code == 200 for r in results)
     thresholds = {r.json()["threshold"] for r in results if "score" in r.json()}
-    assert thresholds <= {0.6275163888931274, 0.4360462427139282, 0.27212807536125183}
+    assert thresholds <= {0.3423501253128052, 0.2933087944984436}
     assert client.get("/logs").json()["total"] == 32
 
 
@@ -85,7 +87,9 @@ def test_async_gather_verify(client):
     by_seed: dict[int, set] = {}
     for i, r in enumerate(results):
         d = r.json()
-        by_seed.setdefault(i % 3, set()).add((d["predictedGesture"], d["score"], d["passed"]))
+        by_seed.setdefault(i % 3, set()).add((d["gestureScore"], d["score"], d["passed"]))
     assert all(len(v) == 1 for v in by_seed.values())  # 같은 입력 → 같은 결과
-    (_, score, passed), = by_seed[0]
-    assert passed is True and score == pytest.approx(1.0, abs=1e-5)
+    (gesture_score, score, passed), = by_seed[0]
+    assert passed is True
+    assert score == pytest.approx(1.0, abs=1e-5)
+    assert gesture_score == pytest.approx(1.0, abs=1e-5)

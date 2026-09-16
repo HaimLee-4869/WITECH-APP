@@ -12,8 +12,8 @@ from tests.conftest import post_json
 from tests.payloads import enroll_body, enroll_same_body, verify_body
 
 GESTURE = "G3"
-FAR1, EER, FAR5 = 0.6275163888931274, 0.4360462427139282, 0.27212807536125183
-UNRELATED_SEED = 7  # seed 0 템플릿과의 유사도가 EER과 FAR1 사이에 오는 입력
+# dual-head 운영점: default(Tu 0.3424) / demo_relaxed(Tu 0.2933). Tg는 둘 다 같다.
+TU_DEFAULT, TU_RELAXED, TG = 0.3423501253128052, 0.2933087944984436, 0.9020317792892456
 
 
 def _enroll(client):
@@ -21,70 +21,95 @@ def _enroll(client):
     assert post_json(client, "/enroll", enroll_same_body(gesture_id=GESTURE, seed=0)).status_code == 200
 
 
-def _verify(client, seed=UNRELATED_SEED):
+def _verify(client, seed=0):
     return post_json(client, "/verify", verify_body(seed=seed, gesture_id=GESTURE)).json()
 
 
-def test_three_operating_points_in_db(client):
+def test_operating_points_in_db(client):
+    """운영점 2개가 각각 user/gesture 두 행으로 들어간다."""
     rows = client.get("/admin/thresholds").json()
-    assert [(r["basis"], r["value"], r["isActive"]) for r in rows] == [
-        ("far1", FAR1, True),
-        ("eer", EER, False),
-        ("far5", FAR5, False),
-    ]
-    assert rows[0]["far"] == pytest.approx(0.0095, abs=1e-4)
-    assert rows[0]["frr"] == pytest.approx(0.0429, abs=1e-4)
+    got = {(r["basis"], r["gate"], r["value"], r["isActive"]) for r in rows}
+    assert got == {
+        ("default", "user", TU_DEFAULT, True),
+        ("default", "gesture", TG, True),
+        ("demo_relaxed", "user", TU_RELAXED, False),
+        ("demo_relaxed", "gesture", TG, False),
+    }
 
 
-def test_switch_flips_decision_without_restart(client):
+def test_switch_changes_active_pair_without_restart(client):
     _enroll(client)
     before = _verify(client)
-    assert EER < before["score"] < FAR1, "테스트 입력이 두 운영점 사이에 있어야 판정이 뒤집힌다"
-    assert before["passed"] is False and before["threshold"] == FAR1
+    assert before["threshold"] == TU_DEFAULT and before["gestureThreshold"] == TG
 
-    res = client.post("/admin/threshold", json={"basis": "eer"})
+    res = client.post("/admin/threshold", json={"basis": "demo_relaxed"})
     assert res.status_code == 200
-    assert res.json()["value"] == EER and res.json()["isActive"] is True
+    # 응답은 활성 두 행(관문마다 하나)
+    assert {(r["gate"], r["value"]) for r in res.json()} == {
+        ("user", TU_RELAXED),
+        ("gesture", TG),
+    }
 
     after = _verify(client)
     assert after["score"] == before["score"]
-    assert after["threshold"] == EER
-    assert after["passed"] is True
+    assert after["threshold"] == TU_RELAXED      # 완화 운영점은 user 관문만 낮춘다
+    assert after["gestureThreshold"] == TG
 
-    client.post("/admin/threshold", json={"basis": "far1"})
-    assert _verify(client)["passed"] is False
+    client.post("/admin/threshold", json={"basis": "default"})
+    assert _verify(client)["threshold"] == TU_DEFAULT
 
 
-def test_only_one_active_after_switches(client, db):
-    for basis in ("eer", "far5", "eer"):
+def test_only_one_basis_active_after_switches(client, db):
+    for basis in ("demo_relaxed", "default", "demo_relaxed"):
         client.post("/admin/threshold", json={"basis": basis})
     with db.session() as s:
-        active = s.scalars(select(models.Threshold.basis).where(models.Threshold.is_active.is_(True))).all()
-    assert active == ["eer"]
-    assert client.get("/health").json()["activeThresholdBasis"] == "eer"
+        rows = s.scalars(
+            select(models.Threshold).where(models.Threshold.is_active.is_(True))
+        ).all()
+    # 활성은 한 운영점의 두 관문뿐
+    assert {r.basis for r in rows} == {"demo_relaxed"}
+    assert {r.gate for r in rows} == {"user", "gesture"}
+    assert client.get("/health").json()["activeThresholdBasis"] == "demo_relaxed"
 
 
 def test_unknown_basis_changes_nothing(client):
-    res = client.post("/admin/threshold", json={"basis": "far0.1"})
+    res = client.post("/admin/threshold", json={"basis": "super_relaxed"})
     assert res.status_code == 404
     assert res.json()["detail"]["reason"] == "threshold_not_found"
-    assert client.get("/health").json()["activeThresholdBasis"] == "far1"
+    assert client.get("/health").json()["activeThresholdBasis"] == "default"
 
 
 def test_switch_persists_across_restart(settings):
     with TestClient(create_app(settings)) as c:
-        c.post("/admin/threshold", json={"basis": "far5"})
+        c.post("/admin/threshold", json={"basis": "demo_relaxed"})
     with TestClient(create_app(settings)) as c:  # startup 시드가 덮어쓰지 않아야 한다
-        assert c.get("/health").json()["activeThreshold"] == FAR5
+        assert c.get("/health").json()["activeThreshold"] == TU_RELAXED
 
 
-def test_logs_record_threshold_used(client):
+def test_logs_record_thresholds_used(client):
     _enroll(client)
     _verify(client)
-    client.post("/admin/threshold", json={"basis": "eer"})
+    client.post("/admin/threshold", json={"basis": "demo_relaxed"})
     _verify(client)
     items = client.get("/logs").json()["items"]
-    assert [(i["threshold"], i["passed"]) for i in reversed(items)] == [(FAR1, False), (EER, True)]
+    used = [(i["threshold"], i["gestureThreshold"]) for i in reversed(items)]
+    assert used == [(TU_DEFAULT, TG), (TU_RELAXED, TG)]
+
+
+def test_capture_duration_change_warns_about_templates(client, caplog):
+    """촬영 길이는 모델 입력 feature다. 조용히 바뀌면 원인 모를 인증 실패가 된다."""
+    caplog.set_level("WARNING", logger="app.routers.admin")
+    res = client.patch("/admin/config", json={"captureDurationMs": 2500})
+    assert res.status_code == 200
+    assert res.json()["captureDurationMs"] == 2500
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("captureDurationMs 4000 → 2500" in w for w in warnings)
+    assert any("clear_enrollments" in w for w in warnings)
+
+    # 같은 값으로 다시 보내면 경고하지 않는다 (바뀐 게 없다).
+    caplog.clear()
+    client.patch("/admin/config", json={"captureDurationMs": 2500})
+    assert not [r for r in caplog.records if "captureDurationMs" in r.getMessage()]
 
 
 def test_patch_config_applies_immediately(client):

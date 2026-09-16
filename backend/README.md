@@ -3,8 +3,12 @@
 수어 제스처 기반 비접촉 인증 시스템의 FastAPI 백엔드. Flutter 앱과 AI 모델 사이를 연결하고
 사용자·등록·인증 이력을 관리한다. 설계 근거는 [`../BACKEND_SPEC.md`](../BACKEND_SPEC.md).
 
-> `ai/`에는 AI팀 릴리스 `handonly-supcon-v1.0.0`이 들어 있다 (2026-09-16 교체).
-> 원본은 `ai/AI_RELEASE_README.md`, `ai/manifest.json`. 성능 한계는 [9장](#9-알려진-한계)을 볼 것.
+> `ai/`에는 AI팀 릴리스 **`shared-dual-head-v1.1.1`**이 들어 있다 (2026-09-17 교체).
+> 이전 릴리스는 `ai_v1.0.0_baseline/`에 보관한다(쓰이지 않음).
+> 원본 문서는 `ai/README.md`, `ai/manifest.json`. 성능 한계는 [9장](#9-알려진-한계)을 볼 것.
+>
+> **판정은 관문 두 개다.** `gesture_score >= Tg AND user_score >= Tu`.
+> user 관문만 있던 v1.0.0에서는 본인이 등록과 다른 동작을 해도 통과했다.
 
 목차
 
@@ -41,11 +45,11 @@ startup에서 자동으로 한다:
 - `ai.encoder.load_model()` **1회** (가중치 로드, 약 1초)
 - 기본 데이터: 제스처 G1~G5, threshold 3종(far1 활성), `app_config` 기본값. 이미 있으면 덮어쓰지 않는다.
 
-시연용 사용자·이력 (관리자 화면이 비어 보이지 않게):
+팀 사용자 (인증 이력은 만들지 않는다. 실제 테스트로만 쌓인다):
 
 ```bash
-python scripts/seed_demo_data.py            # 사용자 6명 + 최근 5개월 인증 이력
-python scripts/seed_demo_data.py --reset    # 데모 사용자 ID(hong, kim, oh, dooly, ddochi, go)만 지우고 재생성
+python scripts/seed_demo_data.py            # 팀원 5명
+python scripts/seed_demo_data.py --reset    # 팀 사용자 ID의 등록·이력까지 지우고 재생성
 ```
 
 테스트:
@@ -68,21 +72,8 @@ pytest                                      # 테스트마다 임시 SQLite
 | `AI_DEVICE` | `cpu` | `load_model(device=...)` |
 | `LOG_LEVEL` | `INFO` | |
 | `CORS_ORIGINS` | `*` | 쉼표 구분 |
-| `USE_GESTURE_CLASSIFIER` | `false` | `/verify`에서 템플릿을 고르는 방식. 아래 참고 |
-
-#### `USE_GESTURE_CLASSIFIER`
-
-| | `false` (기본, 2026-09-16 팀 결정) | `true` (명세 7장) |
-|---|---|---|
-| 템플릿 조회 키 | 앱이 보낸 `gestureId` | `classify_gesture()` 예측 제스처 |
-| `gestureId` | **필수**. 없으면 422 `gesture_id_required` | 선택. 보냈는데 예측과 다르면 `gesture_mismatch`로 거부 |
-| `classify_gesture()` 호출 | 함 (결과를 `predictedGesture`·`auth_logs.predicted_gesture_id`에 기록만, 판정에 안 씀) | 함 |
-
-**운영은 `false`다.** 제스처 분류기는 G1~G5 닫힌 집합이라 판정에 쓰지 않기로 했고,
-오분류 분석용으로 기록만 한다. 앱이 보내는 `gestureId`는 지금 G1~G5이며, AI팀이 개인 제스처 ID
-방식을 주면 **값만 바뀌고 구조는 그대로**다 (조회 키가 문자열이라 스키마 변경이 없다).
-
-응답의 `gestureId`는 실제로 템플릿 조회에 쓴 제스처다. 바꾸려면 `.env` 수정 후 서버 재시작.
+제스처 분류기 전환 설정(`USE_GESTURE_CLASSIFIER`)은 dual-head 교체로 사라졌다.
+제스처는 분류가 아니라 임베딩으로 판정하고, 조회 키는 항상 앱이 보낸 `gestureId`다.
 
 ### `app_config` 테이블 — 운영 중 바꾸는 값 (재시작 불필요)
 
@@ -90,7 +81,7 @@ pytest                                      # 테스트마다 임시 SQLite
 |---|---|---|
 | `enrollmentTakes` | 3 | 제스처당 등록 횟수. `/enroll`은 takeNo 1..N을 모두 요구 |
 | `enrollmentGestures` | 1 | 등록할 제스처 수. ⚠️ AI팀 확인 대기 (1 또는 5) |
-| `captureDurationMs` | 2000 | 앱 촬영 시간 |
+| `captureDurationMs` | 4000 | 앱 촬영 시간. ⚠️ 바꾸면 기존 등록이 무효다 (9장) |
 | `handRequired` | `right` | 앱 안내용 |
 | `activeModelVersion` | 로드된 인코더 버전 | 재색인이 바꾼다. 직접 수정 금지 |
 
@@ -114,7 +105,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | GET | `/stats/monthly?months=5` | 월별 인증 건수 (KST, 0건인 달 포함) |
 | GET | `/health` | 상태, 모델 버전, 활성 threshold |
 | GET | `/admin/thresholds` | 활성 모델의 threshold 운영점 목록 |
-| POST | `/admin/threshold` | 활성 threshold 전환 `{basis: "far1" \| "eer" \| "far5"}` |
+| POST | `/admin/threshold` | 활성 운영점 전환 `{basis: "default" \| "demo_relaxed"}` (두 관문이 함께 바뀐다) |
 | POST | `/admin/reindex` | 재색인 `{modelVersion, dryRun}` |
 | PATCH | `/admin/config` | `app_config` 변경 |
 
@@ -314,7 +305,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 {
   "enrollmentTakes": 3,
   "enrollmentGestures": 1,
-  "captureDurationMs": 2000,
+  "captureDurationMs": 4000,
   "handRequired": "right",
   "modelVersion": "handonly-supcon-v1.0.0"
 }
@@ -403,9 +394,9 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 
 | 코드 | 명세 | HTTP | `score` | 의미 |
 |---|---|---|---|---|
-| `below_threshold` | 명세 | 200 | 숫자 | 유사도가 활성 threshold 미만 |
-| `no_template` | 명세 | 200 | `null` | 해당 (사용자, 제스처, 활성 모델 버전) 템플릿 없음 |
-| `gesture_mismatch` | 명세 | 200 | `null` | `gestureId`가 분류 결과와 다름 (`USE_GESTURE_CLASSIFIER=true`에서만) |
+| `below_threshold` | 명세 | 200 | 숫자 | **user 관문 미달.** 동작은 맞지만 본인으로 보이지 않는다 |
+| **`gesture_gate`** | **dual-head 추가** | 200 | 숫자 | **gesture 관문 미달.** 등록한 동작이 아니다 (본인이어도 거부) |
+| `no_template` | 명세 | 200 | `null` | 해당 (사용자, 제스처, 활성 모델 버전) 템플릿 없음. dual-head는 user·gesture 둘 다 있어야 한다 |
 | `invalid_input` | 명세 | 422 | `null` | AI 모듈이 입력 거절. 세부 사유는 응답 `detail.reason` |
 | **`model_version_mismatch`** | **명세 외 추가** | **503** | `null` | 로드된 인코더와 활성 모델 버전이 다름 (인코더 교체 후 재색인 전). 벡터 공간이 달라 비교하면 조용히 틀리므로 비교하지 않고 거부 |
 
@@ -447,18 +438,41 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 
 ## 6. threshold 운영
 
-threshold는 DB `thresholds` 테이블에만 있다 (코드·앱에 없음). 요청마다 활성 행을 읽으므로 **전환 즉시 반영, 재시작 불필요.**
+dual-head는 관문이 둘이라 **운영점 하나가 두 값(Tu, Tg)** 을 갖는다. DB에는 관문마다
+한 행씩(`gate` 컬럼) 들어가고, `basis`로 묶어 함께 전환한다. 요청마다 활성 행을 읽으므로
+**전환 즉시 반영, 재시작 불필요.**
 
-| basis | threshold | Val FAR | Val FRR |
+| basis | Tu (본인) | Tg (동작) | 검증셋 user FAR/FRR |
 |---|---|---|---|
-| `far1` (기본) | 0.627516 | 0.95% | 4.29% |
-| `eer` | 0.436046 | 2.86% | 2.86% |
-| `far5` | 0.272128 | 5.00% | 2.14% |
+| `default` (기본) | 0.342350 | 0.902032 | 4.05% / 4.29% |
+| `demo_relaxed` | 0.293309 | 0.902032 | 4.76% / 2.86% |
+
+`demo_relaxed`는 **user 관문만** 낮춘다. 시연에서 본인 거부가 잦을 때 쓴다.
+동작이 안 맞아 막히는 경우(`gesture_gate`)는 이 운영점으로 풀리지 않는다.
 
 ```bash
 curl localhost:8000/admin/thresholds
-curl -X POST localhost:8000/admin/threshold -H 'Content-Type: application/json' -d '{"basis": "eer"}'
+curl -X POST localhost:8000/admin/threshold \
+  -H 'Content-Type: application/json' -d '{"basis": "demo_relaxed"}'
 ```
+
+`auth_logs`에는 시도마다 두 점수와 두 임계값이 모두 남는다.
+
+### 촬영 길이를 바꿀 때 (`captureDurationMs`)
+
+⚠️ **기존 등록 템플릿이 무효가 된다.** 9장 첫 항목을 먼저 읽을 것. 순서는 이렇다.
+
+```bash
+curl -X PATCH localhost:8000/admin/config \
+  -H 'Content-Type: application/json' -d '{"captureDurationMs": 4000}'
+curl localhost:8000/config                      # 반영 확인
+
+python scripts/clear_enrollments.py --dry-run   # 지울 대상 확인
+python scripts/clear_enrollments.py             # 원본·임베딩·템플릿 삭제
+```
+
+서버를 멈출 필요는 없다(요청마다 DB에서 읽는다). 사용자와 인증 이력은 남는다.
+이후 앱을 다시 시작해 새 길이로 **전원 재등록**한다.
 
 시연 리허설에서 거부가 잦으면 `eer`로 내린다. `auth_logs.threshold`에 시도마다 쓴 값이 남는다.
 
@@ -558,21 +572,44 @@ curl -X POST localhost:8000/admin/threshold -H 'Content-Type: application/json' 
 
 ## 9. 알려진 한계
 
-**모델 성능 (AI팀 명시)**
+**모델 성능 (AI팀 `ai/calibration_report.md`)**
 
-| | 검증셋 | 처음 보는 사용자 |
-|---|---|---|
-| FAR | 0.95% | **7.16%** |
-| FRR | 4.29% | **40.54%** |
+| 지표 (P08~P10, 신규 사용자 7,275 trial) | 값 |
+|---|---|
+| Accuracy | 95.77% |
+| **Genuine FRR** | **28.04%** |
+| Combined Attack FAR | 3.22% |
+| Wrong-Gesture FAR | 1.52% |
+| **Same-Gesture Impostor FAR** | **17.34%** |
+| Random Impostor FAR | 0.13% |
 
-처음 보는 사용자는 본인도 10번 중 4번 거부될 수 있다. "FAR 1%를 보장하는 출입 통제 수준"으로 표현하면 안 된다.
+검증셋(학습에 참여한 사용자) 수치는 gesture EER 0%, user EER 4.17%인데, **그대로 인용하면 안 된다.**
+AI팀 문서가 "validation Gesture EER 0%를 자유 제스처 성능으로 제시하지 말 것"이라고 명시한다.
+
+신규 사용자 FRR 28.04%는 본인도 10번 중 3번쯤 거부된다는 뜻이다(v1.0.0의 40.54%에서 개선).
+주 병목은 같은 동작을 아는 공격자(17.34%)다. 출입 통제 수준으로 표현하면 안 된다.
+
+**P08~P10도 제스처는 G1~G5다.** "Unseen User + Known Gesture"이지 자유 제스처 결과가 아니다.
 
 **백엔드**
 
-- **제스처 분류기는 닫힌 집합**: G1~G5만 출력하고 "미분류"가 없다. 학습에 없는 동작도 다섯 개 중 하나로 분류된다.
-  그래서 운영은 `USE_GESTURE_CLASSIFIER=false`(앱의 `gestureId`로 조회)이고 분류 결과는 기록만 한다.
-  개인 제스처를 쓰려면 AI팀의 새 릴리스와 검증이 필요하다 (조회 키는 문자열이라 백엔드 구조 변경은 없다).
+- **`encoder.MODEL_VERSION`이 `shared-dual-head-v1.1.0`이다.** 패키지·thresholds·manifest는 `v1.1.1`인데
+  코드 상수만 올라가지 않았다(AI팀 확인된 사항). 백엔드는 이 상수를 DB에 기록하므로 `/health`와
+  `templates.model_version`에는 **v1.1.0**으로 남는다. 동작에는 영향이 없지만, 다음 릴리스에서
+  진짜 v1.1.1이 오면 구분이 안 되므로 그때 AI팀에 상수 갱신을 요청한다.
+- **자유 제스처는 아직 미검증**: 체크포인트는 여전히 G1~G5로 학습됐다. 구조적으로는 제스처를
+  임베딩으로 보므로 개인 제스처가 가능하지만, AI팀이 "unseen free-gesture generalization is not
+  yet validated"라고 명시했다.
+- **모델을 바꾸면 등록이 무효다**: v1.0.0 → v1.1.1처럼 벡터 공간이 달라지면 재색인으로 해결되지 않는다
+  (재색인은 같은 모델의 임베딩 재생성이다). `scripts/clear_enrollments.py` 후 전원 재등록.
 - **등록 정책**: 릴리스 기준 "개인 제스처 1개 × 3회"다 (`enrollmentGestures=1`, `enrollmentTakes=3`).
+- **촬영 길이를 바꾸면 기존 등록이 무효가 된다.** `captureDurationMs`는 화면 설정이 아니라
+  **AI 모델의 입력 feature**다(학습 분포: 평균 3.29초, 표준편차 1.15초). 등록과 인증의 길이가
+  다르면 같은 사람·같은 동작도 유사도가 크게 떨어진다. 합성 입력 실측에서 2초로 등록한
+  템플릿에 5초 인증을 하면 **0.51**로, 활성 threshold 0.6275 아래였다(무관한 동작이 0.43).
+  에러 없이 인증만 실패하므로 원인을 찾기 어렵다. 값을 바꾸면 `PATCH /admin/config`가 경고를
+  로그에 남기고, **`scripts/clear_enrollments.py`로 정리한 뒤 전원 재등록해야 한다.**
+  (인코더 교체는 다르다. 그건 원본이 남아 있으므로 `POST /admin/reindex`로 재생성한다.)
 - **오른손 전용**: 프레임에 왼손 `handedness`가 있으면 AI 모듈이 거절한다(422 `wrong_hand`).
   handedness를 보내지 않으면 검사되지 않으므로 앱이 화면에서 강제해야 한다.
 - **테스트 데이터는 합성 좌표**: 테스트의 유사도 값(같은 입력 1.0 등)은 배선 확인용이며 실제 인식 성능이 아니다.
@@ -604,11 +641,13 @@ backend/
 │       ├── reindex_service.py   # 재색인
 │       ├── threshold_service.py
 │       └── app_config_service.py
-├── ai/                          # AI팀 릴리스 (encoder/features/model_defs/weights/thresholds)
+├── ai/                          # AI팀 릴리스 shared-dual-head-v1.1.1
+├── ai_v1.0.0_baseline/          # 이전 릴리스 보관 (import되지 않음)
 ├── alembic/                     # 마이그레이션
 ├── examples/                    # 앱팀 전달용 완전한 요청 예시
 ├── scripts/
 │   ├── seed_demo_data.py
+│   ├── clear_enrollments.py     # 등록 원본·임베딩·템플릿 삭제 (촬영 조건이 바뀐 경우)
 │   ├── import_thresholds.py     # ai/thresholds.json → app/default_thresholds.json
 │   └── verify_ai_release.py
 └── tests/

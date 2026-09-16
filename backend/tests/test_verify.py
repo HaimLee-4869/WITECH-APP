@@ -1,11 +1,10 @@
-"""6단계: POST /verify + threshold 비교 + 로깅.
-
-기본 클라이언트(`client`)는 운영 설정 USE_GESTURE_CLASSIFIER=false다.
-앱이 보낸 gestureId로 템플릿을 조회하고, 분류 결과는 기록만 한다.
-`client_classifier`는 명세 7장의 true 모드다.
+"""POST /verify — dual-head 두 관문 (gesture >= Tg AND user >= Tu).
 
 합성 랜드마크라 유사도의 절대값은 의미가 없다. 같은 입력이면 1.0, 무관한 입력이면
 낮다는 성질만 이용한다.
+
+**핵심 회귀 테스트**: 같은 사람이 등록과 다른 동작을 하면 통과하면 안 된다.
+v1.0.0은 user 임베딩만 봐서 이걸 막지 못했다(실기기 실측 0.81~0.99 전부 통과).
 """
 
 from __future__ import annotations
@@ -20,16 +19,12 @@ from ai import encoder
 from app import models
 from app.services import app_config_service as cfg
 from tests.conftest import post_json
-from tests.payloads import (
-    enroll_body,
-    enroll_same_body,
-    other_gesture,
-    predicted_gesture,
-    verify_body,
-)
+from tests.payloads import enroll_same_body, other_gesture, verify_body
 
-GESTURE = "G3"          # 앱이 보내는 gestureId (개인 제스처 ID로 바뀌어도 구조는 동일)
+GESTURE = "G3"          # 앱이 보내는 gestureId
 UNRELATED_SEED = 1      # seed 0 등록분과 무관한 입력
+TU = 0.3423501253128052
+TG = 0.9020317792892456
 
 
 def _logs(db):
@@ -46,40 +41,49 @@ def enrolled(client, make_user):
     return GESTURE
 
 
-# --- 운영 모드 (USE_GESTURE_CLASSIFIER=false) ---------------------------------------
+# --- 기본 흐름 ---------------------------------------------------------------------
 
-def test_same_input_passes_with_score_near_one(client, enrolled):
+def test_same_input_passes_both_gates(client, enrolled):
     res = post_json(client, "/verify", verify_body(seed=0, gesture_id=GESTURE))
     assert res.status_code == 200, res.text
     data = res.json()
-    assert data["score"] == pytest.approx(1.0, abs=1e-5)
     assert data["passed"] is True
     assert data["reason"] is None
-    assert data["threshold"] == 0.6275163888931274
-    assert data["gestureId"] == GESTURE                    # 조회에 쓴 제스처 = 앱이 보낸 값
-    assert data["predictedGesture"] in {"G1", "G2", "G3", "G4", "G5"}  # 기록만
-    assert 0.0 <= data["gestureConfidence"] <= 1.0
+    assert data["score"] == pytest.approx(1.0, abs=1e-5)          # user 관문
+    assert data["gestureScore"] == pytest.approx(1.0, abs=1e-5)   # gesture 관문
+    assert data["threshold"] == TU
+    assert data["gestureThreshold"] == TG
+    assert data["gestureId"] == GESTURE
     assert data["modelVersion"] == encoder.MODEL_VERSION
     assert isinstance(data["latencyMs"], int)
 
 
 def test_unrelated_input_rejected(client, enrolled):
     data = post_json(client, "/verify", verify_body(seed=UNRELATED_SEED, gesture_id=GESTURE)).json()
-    assert data["score"] < data["threshold"]
     assert data["passed"] is False
-    assert data["reason"] == "below_threshold"
+    assert data["reason"] in {"gesture_gate", "below_threshold"}
+    assert data["score"] is not None and data["gestureScore"] is not None
 
 
-def test_prediction_is_recorded_but_not_used(client, db, enrolled):
-    """분류 결과가 gestureId와 달라도 판정에 영향이 없어야 한다."""
-    predicted = predicted_gesture(0)
-    body = verify_body(seed=0, gesture_id=GESTURE)
-    data = post_json(client, "/verify", body).json()
+def test_same_user_different_gesture_is_blocked(client, db, make_user):
+    """**회귀 테스트.** 본인이 등록과 다른 동작을 하면 gesture 관문에서 막혀야 한다.
+
+    v1.0.0에서는 user 점수만 봤기 때문에 통과했다. dual-head의 존재 이유다.
+    """
+    make_user()
+    # 같은 사람이 두 동작을 등록한다. 서로 다른 입력이므로 gesture 임베딩이 갈린다.
+    assert post_json(client, "/enroll", enroll_same_body(gesture_id="G1", seed=0)).status_code == 200
+    assert post_json(client, "/enroll", enroll_same_body(gesture_id="G2", seed=7)).status_code == 200
+
+    # G1을 등록한 사람이 G2 동작을 하면서 G1이라고 주장한다.
+    data = post_json(client, "/verify", verify_body(seed=7, gesture_id="G1")).json()
+    assert data["passed"] is False
+    assert data["reason"] == "gesture_gate"
+    assert data["gestureScore"] < data["gestureThreshold"]
+
     log = _logs(db)[-1]
-    assert (log.claimed_gesture_id, log.predicted_gesture_id) == (GESTURE, predicted)
-    assert log.gesture_confidence is not None
-    assert data["passed"] is True
-    assert data["reason"] != "gesture_mismatch"
+    assert log.fail_reason == "gesture_gate"
+    assert log.gesture_score is not None and log.gesture_threshold == TG
 
 
 def test_gesture_id_required(client, enrolled):
@@ -92,17 +96,7 @@ def test_no_template_for_other_gesture(client, enrolled):
     data = post_json(client, "/verify", verify_body(seed=0, gesture_id=other_gesture(GESTURE))).json()
     assert data["passed"] is False
     assert data["reason"] == "no_template"
-    assert data["score"] is None
-
-
-def test_second_gesture_uses_its_own_template(client, db, enrolled, make_user):
-    """한 사용자가 제스처를 두 개 등록하면 gestureId로 갈라진다."""
-    other = other_gesture(GESTURE)
-    assert post_json(client, "/enroll", enroll_same_body(gesture_id=other, seed=5)).status_code == 200
-    same = post_json(client, "/verify", verify_body(seed=5, gesture_id=other)).json()
-    crossed = post_json(client, "/verify", verify_body(seed=5, gesture_id=GESTURE)).json()
-    assert same["passed"] is True and same["score"] == pytest.approx(1.0, abs=1e-5)
-    assert crossed["score"] < same["score"]
+    assert data["score"] is None and data["gestureScore"] is None
 
 
 def test_unknown_user(client):
@@ -111,23 +105,37 @@ def test_unknown_user(client):
     assert res.json()["detail"]["reason"] == "user_not_found"
 
 
-def test_threshold_read_from_db_each_request(client, db, enrolled):
+def test_user_gate_blocks_other_person(client, db, make_user):
+    """다른 사람이 같은 동작을 해도 user 관문에서 막힌다."""
+    make_user()
+    make_user("lee", "이길동")
+    post_json(client, "/enroll", enroll_same_body("kim", GESTURE, 0))
+    # lee가 kim의 동작을 흉내 내지만 lee의 템플릿은 없다 → no_template
+    assert post_json(client, "/verify", verify_body("lee", 0, gesture_id=GESTURE)).json()["reason"] == "no_template"
+
+    # lee도 등록한 뒤, kim의 입력으로 lee를 인증하려 하면 두 관문 중 하나에서 막힌다.
+    post_json(client, "/enroll", enroll_same_body("lee", GESTURE, 9))
+    data = post_json(client, "/verify", verify_body("lee", 0, gesture_id=GESTURE)).json()
+    assert data["passed"] is False
+
+
+def test_thresholds_read_from_db_each_request(client, db, enrolled):
     """threshold는 코드 상수가 아니라 DB 활성 행. 값을 바꾸면 재시작 없이 반영."""
     first = post_json(client, "/verify", verify_body(seed=UNRELATED_SEED, gesture_id=GESTURE)).json()
     assert first["passed"] is False
     with db.session() as s:
-        row = s.scalar(select(models.Threshold).where(models.Threshold.is_active.is_(True)))
-        row.value = first["score"] - 0.01
+        for row in s.scalars(select(models.Threshold).where(models.Threshold.is_active.is_(True))):
+            row.value = -1.0  # 어떤 점수든 통과하도록 낮춘다
         s.commit()
     second = post_json(client, "/verify", verify_body(seed=UNRELATED_SEED, gesture_id=GESTURE)).json()
     assert second["score"] == first["score"]
-    assert second["threshold"] != first["threshold"]
+    assert second["gestureScore"] == first["gestureScore"]
     assert second["passed"] is True
 
 
 # --- auth_logs ------------------------------------------------------------------
 
-def test_auth_log_records_everything(client, db, enrolled):
+def test_auth_log_records_both_gates(client, db, enrolled):
     body = verify_body(seed=0, gesture_id=GESTURE)
     raw = json.dumps(body)
     client.post("/verify", content=raw, headers={"Content-Type": "application/json"})
@@ -135,88 +143,52 @@ def test_auth_log_records_everything(client, db, enrolled):
     assert log.user_id == "kim"
     assert log.passed is True and log.fail_reason is None
     assert log.score == pytest.approx(1.0, abs=1e-5)
-    assert log.threshold == 0.6275163888931274
+    assert log.threshold == TU
+    assert log.gesture_score == pytest.approx(1.0, abs=1e-5)
+    assert log.gesture_threshold == TG
     assert log.claimed_gesture_id == GESTURE
-    assert log.predicted_gesture_id is not None
     assert log.auth_model_version == encoder.MODEL_VERSION
-    assert log.gesture_model_version == encoder.GESTURE_MODEL_VERSION
     assert log.landmarks_json == raw  # 앱이 보낸 바이트 그대로
     assert log.latency_ms is not None and log.latency_ms >= 0
 
 
 def test_failures_are_logged_too(client, db, enrolled):
-    post_json(client, "/verify", verify_body(seed=0, gesture_id=GESTURE))                      # 통과
-    post_json(client, "/verify", verify_body(seed=UNRELATED_SEED, gesture_id=GESTURE))         # 점수 미달
-    post_json(client, "/verify", verify_body(seed=0, gesture_id=other_gesture(GESTURE)))       # 템플릿 없음
+    post_json(client, "/verify", verify_body(seed=0, gesture_id=GESTURE))                   # 통과
+    post_json(client, "/verify", verify_body(seed=UNRELATED_SEED, gesture_id=GESTURE))      # 관문 미달
+    post_json(client, "/verify", verify_body(seed=0, gesture_id=other_gesture(GESTURE)))    # 템플릿 없음
     bad = verify_body(seed=0, gesture_id=GESTURE)
     bad["frames"] = bad["frames"][:3]
-    assert post_json(client, "/verify", bad).status_code == 422                                # 입력 거절
-    assert [(l.passed, l.fail_reason) for l in _logs(db)] == [
-        (True, None), (False, "below_threshold"), (False, "no_template"), (False, "invalid_input"),
-    ]
+    assert post_json(client, "/verify", bad).status_code == 422                             # 입력 거절
+
+    rows = [(l.passed, l.fail_reason) for l in _logs(db)]
+    assert rows[0] == (True, None)
+    assert rows[1][0] is False and rows[1][1] in {"gesture_gate", "below_threshold"}
+    assert rows[2] == (False, "no_template")
+    assert rows[3] == (False, "invalid_input")
     assert all(l.landmarks_json for l in _logs(db))
 
 
-# --- 명세 7장 모드 (USE_GESTURE_CLASSIFIER=true) --------------------------------------
+def test_each_request_logs_one_summary_line(client, enrolled, caplog):
+    caplog.set_level("INFO", logger="app.services.auth_service")
+    ok = verify_body(seed=0, gesture_id=GESTURE)
+    post_json(client, "/verify", ok)
+    post_json(client, "/verify", verify_body(seed=UNRELATED_SEED, gesture_id=GESTURE))
+    bad = verify_body(seed=0, gesture_id=GESTURE)
+    bad["frames"] = bad["frames"][:3]
+    post_json(client, "/verify", bad)
 
-@pytest.fixture
-def enrolled_as_predicted(client_classifier):
-    """true 모드에서 통과하려면 분류 모델이 예측하는 제스처로 등록해야 한다."""
-    c = client_classifier
-    c.post("/users", json={"id": "kim", "name": "김길동"})
-    gesture = predicted_gesture(0)
-    assert post_json(c, "/enroll", enroll_same_body(gesture_id=gesture, seed=0)).status_code == 200
-    return gesture
-
-
-def test_classifier_mode_uses_prediction(client_classifier, enrolled_as_predicted):
-    data = post_json(client_classifier, "/verify", verify_body(seed=0)).json()
-    assert data["passed"] is True
-    assert data["gestureId"] == enrolled_as_predicted == data["predictedGesture"]
-
-
-def test_classifier_mode_gesture_mismatch(client_classifier, enrolled_as_predicted):
-    claimed = other_gesture(enrolled_as_predicted)
-    data = post_json(client_classifier, "/verify", verify_body(seed=0, gesture_id=claimed)).json()
-    assert data["passed"] is False
-    assert data["reason"] == "gesture_mismatch"
-    assert data["score"] is None
-
-
-def test_classifier_mode_matching_gesture_id(client_classifier, enrolled_as_predicted):
-    data = post_json(
-        client_classifier, "/verify", verify_body(seed=0, gesture_id=enrolled_as_predicted)
-    ).json()
-    assert data["passed"] is True
-
-
-def test_modes_differ_on_same_data(client, client_classifier, make_user):
-    """분류 예측과 다른 제스처로 등록한 경우: false는 통과, true는 거부."""
-    predicted = predicted_gesture(0)
-    enrolled = other_gesture(predicted)
-    for c in (client, client_classifier):
-        c.post("/users", json={"id": "lee", "name": "이길동"})
-        post_json(c, "/enroll", enroll_same_body("lee", enrolled, 0))
-
-    false_mode = post_json(client, "/verify", verify_body("lee", 0, gesture_id=enrolled)).json()
-    true_mode = post_json(client_classifier, "/verify", verify_body("lee", 0, gesture_id=enrolled)).json()
-    assert false_mode["passed"] is True
-    assert true_mode["passed"] is False and true_mode["reason"] == "gesture_mismatch"
-
-
-def test_classifier_is_called_in_both_modes(client, client_classifier, monkeypatch, make_user):
-    calls = []
-    original = encoder.classify_gesture
-    monkeypatch.setattr(encoder, "classify_gesture", lambda f: (calls.append(1), original(f))[1])
-
-    make_user()
-    post_json(client, "/enroll", enroll_same_body(gesture_id=GESTURE, seed=0))
-    post_json(client, "/verify", verify_body(seed=0, gesture_id=GESTURE))
-    assert len(calls) == 1  # 등록은 분류를 부르지 않는다
-
-    client_classifier.post("/users", json={"id": "lee", "name": "이길동"})
-    post_json(client_classifier, "/verify", verify_body("lee", 0, gesture_id=GESTURE))
-    assert len(calls) == 2
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("verify ")]
+    assert len(lines) == 3
+    cam = f"camera={ok['camera']['width']}x{ok['camera']['height']}"
+    assert all(f"user=kim gesture={GESTURE} {cam}" in l for l in lines)
+    assert f"frames={len(ok['frames'])}" in lines[0]
+    assert "status=200" in lines[0] and "passed=True" in lines[0] and "reason=-" in lines[0]
+    assert "score=1.0000" in lines[0] and "threshold=0." in lines[0]
+    # 두 관문 값이 모두 한 줄에 남는다.
+    assert "gestureScore=1.0000" in lines[0] and "gestureThreshold=0.9020" in lines[0]
+    assert "passed=False" in lines[1]
+    assert "status=422" in lines[2] and "frames=3" in lines[2] and "score=-" in lines[2]
+    assert not any("[" in l for l in lines)  # 좌표 본문은 찍지 않는다
 
 
 # --- 모델 버전 불일치 -----------------------------------------------------------------
@@ -247,6 +219,8 @@ def test_concurrent_verify_is_consistent(client, db, enrolled, make_user):
     assert all(r.status_code == 200 for r in results)
     kim = [r.json() for r, b in zip(results, bodies) if b["userId"] == "kim"]
     lee = [r.json() for r, b in zip(results, bodies) if b["userId"] == "lee"]
-    assert {(d["passed"], round(d["score"], 6)) for d in kim} == {(True, 1.0)}
+    assert {(d["passed"], round(d["score"], 6), round(d["gestureScore"], 6)) for d in kim} == {
+        (True, 1.0, 1.0)
+    }
     assert {d["reason"] for d in lee} == {"no_template"}
     assert len(_logs(db)) == 24

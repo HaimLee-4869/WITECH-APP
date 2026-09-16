@@ -14,10 +14,9 @@ from app.main import create_app
 @pytest.fixture
 def settings(tmp_path) -> Settings:
     """테스트마다 임시 SQLite 파일."""
-    # 셸 환경변수와 무관하게 고정. 기본은 운영 설정(gestureId로 조회).
+    # 셸 환경변수와 무관하게 고정.
     return Settings(
         database_url=f"sqlite:///{(tmp_path / 'test.db').as_posix()}",
-        use_gesture_classifier=False,
         auto_migrate=True,
         _env_file=None,
     )
@@ -26,14 +25,6 @@ def settings(tmp_path) -> Settings:
 @pytest.fixture
 def client(settings) -> Iterator[TestClient]:
     app = create_app(settings)
-    with TestClient(app) as c:
-        yield c
-
-
-@pytest.fixture
-def client_classifier(settings) -> Iterator[TestClient]:
-    """USE_GESTURE_CLASSIFIER=true (명세 7장 방식)."""
-    app = create_app(settings.model_copy(update={"use_gesture_classifier": True}))
     with TestClient(app) as c:
         yield c
 

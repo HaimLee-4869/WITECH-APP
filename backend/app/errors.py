@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+
+log = logging.getLogger(__name__)
 
 
 class ApiError(Exception):
@@ -48,11 +52,17 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail()})
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_error(_request: Request, exc: RequestValidationError):
+    async def _validation_error(request: Request, exc: RequestValidationError):
         errors = [
             {"loc": list(e.get("loc", ())), "msg": e.get("msg"), "type": e.get("type")}
             for e in exc.errors()
         ]
+        # 스키마 단계에서 막히면 서비스 로그가 안 찍힌다. 어느 필드였는지만 남긴다 (본문 X).
+        log.info(
+            "schema_validation %s %s: %s",
+            request.method, request.url.path,
+            "; ".join(f"{'.'.join(map(str, e['loc']))}={e['type']}" for e in errors[:5]),
+        )
         return JSONResponse(
             status_code=422,
             content={

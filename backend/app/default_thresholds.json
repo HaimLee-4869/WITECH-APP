@@ -1,29 +1,28 @@
 {
-  "source": "ai_release/thresholds.json (handonly-supcon-v1.0.0), scheme=global, 선택 운영점=far_1_percent",
-  "modelVersion": "handonly-supcon-v1.0.0",
+  "source": "ai_release/thresholds.json (shared-dual-head-v1.1.1), 규칙=gesture_score >= gesture_threshold AND user_score >= user_threshold",
+  "modelVersion": "shared-dual-head-v1.1.1",
   "scheme": "global",
-  "defaultBasis": "far1",
+  "defaultBasis": "default",
   "operatingPoints": [
     {
-      "basis": "far1",
-      "value": 0.6275163888931274,
-      "far": 0.009523809523809525,
-      "frr": 0.04285714285714286,
-      "releaseName": "far_1_percent"
+      "basis": "default",
+      "userThreshold": 0.3423501253128052,
+      "gestureThreshold": 0.9020317792892456,
+      "userFar": null,
+      "userFrr": null,
+      "gestureFar": null,
+      "gestureFrr": null,
+      "source": "known-user validation calibration from packaged checkpoint"
     },
     {
-      "basis": "eer",
-      "value": 0.4360462427139282,
-      "far": 0.02857142857142857,
-      "frr": 0.02857142857142857,
-      "releaseName": "eer"
-    },
-    {
-      "basis": "far5",
-      "value": 0.27212807536125183,
-      "far": 0.05,
-      "frr": 0.02142857142857143,
-      "releaseName": "far_5_percent"
+      "basis": "demo_relaxed",
+      "userThreshold": 0.2933087944984436,
+      "gestureThreshold": 0.9020317792892456,
+      "userFar": 0.047619047619047616,
+      "userFrr": 0.02857142857142857,
+      "gestureFar": 0.0,
+      "gestureFrr": 0.0,
+      "source": "known-user validation only"
     }
   ]
 }

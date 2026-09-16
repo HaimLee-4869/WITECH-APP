@@ -11,7 +11,7 @@ from sqlalchemy import select
 from ai import encoder
 from app import models, schemas
 from app.services import template_service
-from app.services.ai_gateway import to_ai_input
+from app.services.ai_gateway import embed_both_batch, to_ai_input
 from tests.conftest import post_json
 from tests.payloads import enroll_body, make_frames
 
@@ -22,9 +22,9 @@ def _count(db, model):
 
 
 def _expected_vectors(body):
-    """백엔드와 같은 경로로 다시 계산한 등록 임베딩."""
+    """백엔드와 같은 경로로 다시 계산한 등록 임베딩 (user, gesture)."""
     req = schemas.EnrollRequest.model_validate(body)
-    return encoder.embed_batch([to_ai_input(req.camera, t.frames) for t in req.takes])
+    return embed_both_batch([to_ai_input(req.camera, t.frames) for t in req.takes])
 
 
 # --- centroid 재정규화 --------------------------------------------------------------
@@ -68,8 +68,9 @@ def test_enroll_success(client, db, make_user):
         "takeCount": 3, "required": 3, "modelVersion": encoder.MODEL_VERSION,
     }
     assert _count(db, models.Enrollment) == 3
-    assert _count(db, models.Embedding) == 3
-    assert _count(db, models.Template) == 1
+    # dual-head: 회차마다 user·gesture 임베딩이 하나씩 나온다.
+    assert _count(db, models.Embedding) == 6
+    assert _count(db, models.Template) == 2
 
 
 def test_enroll_stores_raw_landmarks_losslessly(client, db, make_user):
@@ -90,40 +91,68 @@ def test_enroll_stores_raw_landmarks_losslessly(client, db, make_user):
     assert rows[0].captured_at.hour == 1
 
 
-def test_enroll_template_is_renormalized_centroid(client, db, make_user):
-    """저장된 템플릿 = 3개 임베딩 평균을 재정규화한 것. 이게 깨지면 조용히 틀린다."""
+def test_enroll_templates_are_renormalized_centroids(client, db, make_user):
+    """템플릿 2개 각각이 그 종류 임베딩 3개 평균을 재정규화한 값이어야 한다.
+
+    재정규화가 빠지면 에러 없이 유사도만 낮아진다.
+    """
     make_user()
     body = enroll_body()
     post_json(client, "/enroll", body)
-    vectors = _expected_vectors(body)
+    user_vectors, gesture_vectors = _expected_vectors(body)
+
+    for kind, vectors in (("user", user_vectors), ("gesture", gesture_vectors)):
+        with db.session() as s:
+            tpl = s.scalar(select(models.Template).where(models.Template.kind == kind))
+            stored = s.scalars(
+                select(models.Embedding)
+                .where(models.Embedding.kind == kind)
+                .order_by(models.Embedding.id)
+            ).all()
+        centroid = template_service.from_blob(tpl.centroid)
+        assert np.linalg.norm(centroid) == pytest.approx(1.0, abs=1e-6), kind
+        expected = vectors.mean(axis=0)
+        assert np.linalg.norm(expected) < 0.999, f"{kind}: 평균만으로는 norm이 1이 아니다"
+        expected = expected / np.linalg.norm(expected)
+        assert np.allclose(centroid, expected, atol=1e-6), kind
+        assert tpl.take_count == 3 and tpl.model_version == encoder.MODEL_VERSION
+        assert len(stored) == 3
+        for emb, vec in zip(stored, vectors):
+            assert emb.model_version == encoder.MODEL_VERSION
+            # 배치 forward와 단건 forward는 마지막 자리에서 미세하게 다를 수 있다
+            assert np.allclose(template_service.from_blob(emb.vector), vec, atol=1e-6)
+
+
+def test_user_and_gesture_templates_differ(client, db, make_user):
+    """두 헤드가 같은 값을 내면 관문 하나가 무의미해진다."""
+    make_user()
+    post_json(client, "/enroll", enroll_body())
     with db.session() as s:
-        tpl = s.scalar(select(models.Template))
-        stored_embeddings = s.scalars(select(models.Embedding).order_by(models.Embedding.id)).all()
-    centroid = template_service.from_blob(tpl.centroid)
-    assert np.linalg.norm(centroid) == pytest.approx(1.0, abs=1e-6)
-    assert np.linalg.norm(vectors.mean(axis=0)) < 0.9
-    expected = vectors.mean(axis=0)
-    expected /= np.linalg.norm(expected)
-    assert np.allclose(centroid, expected, atol=1e-6)
-    assert tpl.take_count == 3 and tpl.model_version == encoder.MODEL_VERSION
-    for emb, vec in zip(stored_embeddings, vectors):
-        assert emb.model_version == encoder.MODEL_VERSION
-        # 배치 forward와 단건 forward는 마지막 자리에서 미세하게 다를 수 있다
-        assert np.allclose(template_service.from_blob(emb.vector), vec, atol=1e-6)
+        blobs = {
+            t.kind: template_service.from_blob(t.centroid)
+            for t in s.scalars(select(models.Template))
+        }
+    assert set(blobs) == {"user", "gesture"}
+    assert not np.allclose(blobs["user"], blobs["gesture"])
 
 
 def test_reenroll_replaces_existing(client, db, make_user):
     make_user()
     post_json(client, "/enroll", enroll_body(seeds=(0, 1, 2)))
     with db.session() as s:
-        before = s.scalar(select(models.Template.centroid))
+        before = s.scalar(
+            select(models.Template.centroid).where(models.Template.kind == "user")
+        )
     res = post_json(client, "/enroll", enroll_body(seeds=(10, 11, 12)))
     assert res.status_code == 200
     assert _count(db, models.Enrollment) == 3
-    assert _count(db, models.Embedding) == 3
-    assert _count(db, models.Template) == 1
+    # dual-head: 회차마다 user·gesture 임베딩이 하나씩 나온다.
+    assert _count(db, models.Embedding) == 6
+    assert _count(db, models.Template) == 2
     with db.session() as s:
-        assert s.scalar(select(models.Template.centroid)) != before
+        assert s.scalar(
+            select(models.Template.centroid).where(models.Template.kind == "user")
+        ) != before
 
 
 def test_multiple_gestures_have_separate_templates(client, db, make_user):
@@ -131,9 +160,14 @@ def test_multiple_gestures_have_separate_templates(client, db, make_user):
     assert post_json(client, "/enroll", enroll_body(gesture_id="G1")).status_code == 200
     assert post_json(client, "/enroll", enroll_body(gesture_id="G2", seeds=(5, 6, 7))).status_code == 200
     with db.session() as s:
-        gestures = sorted(s.scalars(select(models.Template.gesture_id)).all())
+        gestures = sorted(
+            s.scalars(
+                select(models.Template.gesture_id).where(models.Template.kind == "user")
+            ).all()
+        )
     assert gestures == ["G1", "G2"]
     assert _count(db, models.Enrollment) == 6
+    assert _count(db, models.Template) == 4  # (G1, G2) × (user, gesture)
 
 
 def test_enroll_unknown_user(client):
@@ -193,13 +227,17 @@ def test_failed_reenroll_keeps_previous_enrollment(client, db, make_user):
     make_user()
     post_json(client, "/enroll", enroll_body())
     with db.session() as s:
-        before = s.scalar(select(models.Template.centroid))
+        before = s.scalar(
+            select(models.Template.centroid).where(models.Template.kind == "user")
+        )
     bad = enroll_body(seeds=(10, 11, 12))
     bad["takes"][2]["frames"][3]["lm"] = [[0.1, 0.2, 0.3]]
     assert post_json(client, "/enroll", bad).status_code == 422
     assert _count(db, models.Enrollment) == 3
     with db.session() as s:
-        assert s.scalar(select(models.Template.centroid)) == before
+        assert s.scalar(
+            select(models.Template.centroid).where(models.Template.kind == "user")
+        ) == before
 
 
 def test_db_failure_mid_enroll_rolls_back(client, db, make_user, monkeypatch):

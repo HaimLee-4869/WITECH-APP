@@ -36,8 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         with app.state.db.session() as session:
             ensure_seed_data(session)
         log.info(
-            "ready: encoder=%s gesture=%s use_gesture_classifier=%s",
-            encoder.MODEL_VERSION, encoder.GESTURE_MODEL_VERSION, settings.use_gesture_classifier,
+            "ready: encoder=%s (dual-head: user/gesture 임베딩)", encoder.MODEL_VERSION
         )
         yield
         app.state.db.dispose()

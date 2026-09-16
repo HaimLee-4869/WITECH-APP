@@ -2,9 +2,9 @@
 
 1. 각 take 검증 → 하나라도 실패하면 전체 422 (부분 등록 금지)
 2. enrollments에 랜드마크 원본 저장
-3. embed_batch → 임베딩
-4. embeddings 저장
-5. 평균 → 재정규화 → templates 저장
+3. embed_both_batch → user·gesture 임베딩 (한 번의 forward)
+4. embeddings 저장 (kind별로 2배)
+5. 각각 평균 → 재정규화 → templates 2개 저장
 
 AI 검증(embed_batch)을 DB 쓰기보다 먼저 하고, 쓰기는 한 트랜잭션으로 묶는다.
 그래서 어느 단계에서 실패해도 기존 등록분이 그대로 남는다.
@@ -26,6 +26,7 @@ from app.services import app_config_service as cfg
 from app.services import template_service
 from app.services.ai_gateway import (
     InvalidSequenceError,
+    embed_both_batch,
     invalid_sequence_error,
     to_ai_input,
 )
@@ -41,21 +42,26 @@ def _check_takes(req: EnrollRequest, required: int) -> None:
         )
 
 
-def _embed_all(inputs: list[dict], take_nos: list[int]) -> np.ndarray:
+def _embed_all(inputs: list[dict], take_nos: list[int]) -> tuple[np.ndarray, np.ndarray]:
+    """(user, gesture) 임베딩. 검증도 이 호출이 겸한다."""
     try:
-        vectors = encoder.embed_batch(inputs)
+        user_vectors, gesture_vectors = embed_both_batch(inputs)
     except InvalidSequenceError as exc:
         # 어느 take가 문제인지 찾아 앱에 알려준다
         for take_no, item in zip(take_nos, inputs):
             try:
-                encoder.embed(item)
+                encoder.embed_both(item)
             except InvalidSequenceError as take_exc:
                 raise invalid_sequence_error(take_exc, take_no=take_no) from exc
         raise invalid_sequence_error(exc) from exc
-    vectors = np.asarray(vectors, dtype=np.float32)
-    if vectors.shape != (len(inputs), encoder.EMBEDDING_DIM):
-        raise RuntimeError(f"embed_batch returned shape {vectors.shape}")
-    return vectors
+    expected = (len(inputs), encoder.EMBEDDING_DIM)
+    user_vectors = np.asarray(user_vectors, dtype=np.float32)
+    gesture_vectors = np.asarray(gesture_vectors, dtype=np.float32)
+    if user_vectors.shape != expected or gesture_vectors.shape != expected:
+        raise RuntimeError(
+            f"embed_both_batch returned {user_vectors.shape} / {gesture_vectors.shape}"
+        )
+    return user_vectors, gesture_vectors
 
 
 def enroll(session: Session, req: EnrollRequest, raw_body: dict) -> EnrollResponse:
@@ -72,7 +78,7 @@ def enroll(session: Session, req: EnrollRequest, raw_body: dict) -> EnrollRespon
     inputs = [to_ai_input(req.camera, t.frames) for t in takes]
 
     # 1, 3. 검증 겸 임베딩. 여기서 실패하면 DB는 건드리지 않았다.
-    vectors = _embed_all(inputs, [t.take_no for t in takes])
+    user_vectors, gesture_vectors = _embed_all(inputs, [t.take_no for t in takes])
     model_version = encoder.MODEL_VERSION
 
     try:
@@ -116,20 +122,23 @@ def enroll(session: Session, req: EnrollRequest, raw_body: dict) -> EnrollRespon
             rows.append(row)
         session.flush()
 
-        # 4. 임베딩 캐시
-        for row, vec in zip(rows, vectors):
-            session.add(
-                Embedding(
-                    enrollment_id=row.id,
-                    model_version=model_version,
-                    vector=template_service.to_blob(vec),
+        # 4. 임베딩 캐시 (kind별로 저장)
+        for kind, vectors in (("user", user_vectors), ("gesture", gesture_vectors)):
+            for row, vec in zip(rows, vectors):
+                session.add(
+                    Embedding(
+                        enrollment_id=row.id,
+                        model_version=model_version,
+                        kind=kind,
+                        vector=template_service.to_blob(vec),
+                    )
                 )
-            )
 
-        # 5. centroid (재정규화는 build_centroid 안에서)
-        template_service.upsert_template(
-            session, req.user_id, req.gesture_id, model_version, vectors
-        )
+        # 5. centroid 2개. 각각 평균 후 재정규화한다 (build_centroid 안에서).
+        for kind, vectors in (("user", user_vectors), ("gesture", gesture_vectors)):
+            template_service.upsert_template(
+                session, req.user_id, req.gesture_id, model_version, vectors, kind=kind
+            )
         session.commit()
     except Exception:
         session.rollback()

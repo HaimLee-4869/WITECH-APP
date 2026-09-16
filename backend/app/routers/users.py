@@ -26,7 +26,11 @@ def _enrolled_gestures(session: Session, user_ids: list[str]) -> dict[str, list[
     version = cfg.get_active_model_version(session)
     rows = session.execute(
         select(Template.user_id, Template.gesture_id)
-        .where(Template.user_id.in_(user_ids), Template.model_version == version)
+        .where(
+            Template.user_id.in_(user_ids),
+            Template.model_version == version,
+            Template.kind == "user",  # dual-head는 (user, gesture) 두 행이라 한쪽만 센다
+        )
         .order_by(Template.gesture_id)
     ).all()
     result: dict[str, list[str]] = defaultdict(list)

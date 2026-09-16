@@ -23,7 +23,7 @@ def test_config_defaults(client):
     assert client.get("/config").json() == {
         "enrollmentTakes": 3,
         "enrollmentGestures": 1,
-        "captureDurationMs": 2000,
+        "captureDurationMs": 4000,
         "handRequired": "right",
         "modelVersion": encoder.MODEL_VERSION,
     }
@@ -75,7 +75,7 @@ def test_delete_user_removes_everything(client, db):
     with db.session() as s:
         for model in (models.Enrollment, models.Template, models.AuthLog):
             assert set(s.scalars(select(model.user_id)).all()) == {"lee"}
-        assert s.query(models.Embedding).count() == 3  # lee 것만
+        assert s.query(models.Embedding).count() == 6  # lee 것만 (user+gesture)
         assert s.get(models.User, "kim") is None
     assert client.delete("/users/kim").status_code == 404
 
@@ -98,8 +98,8 @@ def test_logs_page(client, some_logs):
     assert page["total"] == 5 and page["limit"] == 50 and page["offset"] == 0
     first = page["items"][0]
     assert first["userName"] == "이길동" and first["department"] == "인사팀"
-    assert {"score", "threshold", "passed", "failReason", "predictedGestureId", "claimedGestureId",
-            "authModelVersion", "gestureModelVersion", "latencyMs", "createdAt"} <= set(first)
+    assert {"score", "threshold", "gestureScore", "gestureThreshold", "passed", "failReason",
+            "claimedGestureId", "authModelVersion", "latencyMs", "createdAt"} <= set(first)
     assert "landmarksJson" not in first  # 목록 응답에는 원본을 싣지 않는다
     ids = [i["id"] for i in page["items"]]
     assert ids == sorted(ids, reverse=True)  # 최신순
@@ -160,10 +160,9 @@ def test_health(client):
         "status": "ok",
         "modelVersion": encoder.MODEL_VERSION,
         "loadedModelVersion": encoder.MODEL_VERSION,
-        "gestureModelVersion": encoder.GESTURE_MODEL_VERSION,
-        "activeThreshold": 0.6275163888931274,
-        "activeThresholdBasis": "far1",
-        "useGestureClassifier": False,  # 운영 설정
+        "activeThreshold": 0.3423501253128052,          # Tu
+        "activeGestureThreshold": 0.9020317792892456,   # Tg
+        "activeThresholdBasis": "default",
         "dbOk": True,
     }
 
@@ -176,3 +175,4 @@ def test_health_degraded_on_version_mismatch(client, db):
     assert data["status"] == "degraded"
     assert data["modelVersion"] == "old-v0"
     assert data["activeThreshold"] is None  # old-v0용 threshold 없음
+    assert data["activeGestureThreshold"] is None

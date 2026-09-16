@@ -79,13 +79,17 @@ def test_response_uses_camel_case_and_utc_offset():
 
 
 def test_verify_response_fields():
+    """dual-head는 점수·임계값이 관문마다 하나씩, 총 두 쌍이다."""
     out = schemas.VerifyResponse(
-        score=0.71, threshold=0.627516, passed=True, predicted_gesture="G3",
-        gesture_confidence=0.93, gesture_id="G3", model_version="v", latency_ms=42,
+        score=0.71, threshold=0.342350,
+        gesture_score=0.95, gesture_threshold=0.902032,
+        passed=True, gesture_id="G3", model_version="v", latency_ms=42,
     )
     keys = set(json.loads(out.model_dump_json(by_alias=True)))
-    assert {"score", "threshold", "passed", "predictedGesture", "gestureConfidence",
-            "modelVersion", "latencyMs", "reason"} <= keys
+    assert {"score", "threshold", "gestureScore", "gestureThreshold", "passed",
+            "gestureId", "modelVersion", "latencyMs", "reason"} <= keys
+    # 분류기 시절 필드는 사라졌다.
+    assert "predictedGesture" not in keys and "gestureConfidence" not in keys
 
 
 def test_user_create_id_pattern():

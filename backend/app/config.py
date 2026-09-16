@@ -19,11 +19,6 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "*"
 
-    # false(기본, 2026-09-16 팀 결정): 앱이 보낸 gestureId로 템플릿을 조회하고
-    #   분류 결과는 auth_logs.predicted_gesture_id에 기록만 한다.
-    # true(명세 7장): classify_gesture() 결과로 템플릿을 조회한다.
-    use_gesture_classifier: bool = False
-
     # startup에서 alembic upgrade head를 실행할지.
     auto_migrate: bool = True
 

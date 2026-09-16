@@ -21,9 +21,14 @@ from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
 
+from ai import encoder
 from app.errors import ApiError
 from app.schemas import Camera, Frame
+
+if TYPE_CHECKING:  # numpy는 타입 힌트에만 쓴다
+    import numpy as np
 
 try:  # ai_release는 features.py에만 정의한다. 다른 구성도 견디게 둘 다 본다.
     from ai.encoder import InvalidSequenceError
@@ -38,6 +43,8 @@ __all__ = [
     "to_ai_input",
     "reason_of",
     "invalid_sequence_error",
+    "embed_both",
+    "embed_both_batch",
 ]
 
 # 거절 사유 코드 → 앱이 그대로 보여줄 안내 문구
@@ -91,6 +98,18 @@ def to_ai_input(camera: Camera | None, frames: list[Frame]) -> dict:
             frame["score"] = f.score
         payload["frames"].append(frame)
     return payload
+
+
+def embed_both(payload: dict) -> tuple["np.ndarray", "np.ndarray"]:
+    """(user, gesture) 임베딩. 한 번의 forward로 둘 다 계산한다."""
+    result = encoder.embed_both(payload)
+    return result["user_embedding"], result["gesture_embedding"]
+
+
+def embed_both_batch(payloads: list[dict]) -> tuple["np.ndarray", "np.ndarray"]:
+    """(user[N,128], gesture[N,128]). 등록·재색인에서 쓴다."""
+    result = encoder.embed_both_batch(payloads)
+    return result["user_embeddings"], result["gesture_embeddings"]
 
 
 def reason_of(exc: Exception) -> str:

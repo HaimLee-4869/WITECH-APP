@@ -42,18 +42,30 @@ def from_blob(blob: bytes) -> np.ndarray:
 
 
 def upsert_template(
-    session: Session, user_id: str, gesture_id: str, model_version: str, vectors
+    session: Session,
+    user_id: str,
+    gesture_id: str,
+    model_version: str,
+    vectors,
+    kind: str = "user",
 ) -> Template:
+    """(user, gesture, model_version, kind) centroid를 만든다. kind는 user | gesture."""
     centroid = build_centroid(vectors)
     tpl = session.scalar(
         select(Template).where(
             Template.user_id == user_id,
             Template.gesture_id == gesture_id,
             Template.model_version == model_version,
+            Template.kind == kind,
         )
     )
     if tpl is None:
-        tpl = Template(user_id=user_id, gesture_id=gesture_id, model_version=model_version)
+        tpl = Template(
+            user_id=user_id,
+            gesture_id=gesture_id,
+            model_version=model_version,
+            kind=kind,
+        )
         session.add(tpl)
     tpl.centroid = to_blob(centroid)
     tpl.take_count = len(vectors)
@@ -62,13 +74,18 @@ def upsert_template(
 
 
 def get_template(
-    session: Session, user_id: str, gesture_id: str, model_version: str
+    session: Session,
+    user_id: str,
+    gesture_id: str,
+    model_version: str,
+    kind: str = "user",
 ) -> np.ndarray | None:
     blob = session.scalar(
         select(Template.centroid).where(
             Template.user_id == user_id,
             Template.gesture_id == gesture_id,
             Template.model_version == model_version,
+            Template.kind == kind,
         )
     )
     return None if blob is None else from_blob(blob)

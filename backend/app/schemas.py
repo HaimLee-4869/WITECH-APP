@@ -65,14 +65,16 @@ class VerifyRequest(SequencePayload):
 
 
 class VerifyResponse(ResponseModel):
+    # user 관문: 본인인지
     score: float | None
     threshold: float | None
+    # gesture 관문: 등록한 동작인지 (dual-head)
+    gesture_score: float | None = None
+    gesture_threshold: float | None = None
     passed: bool
-    # below_threshold | no_template | gesture_mismatch. 통과 시 null.
+    # below_threshold | gesture_gate | no_template. 통과 시 null.
     reason: str | None = None
-    predicted_gesture: str | None
-    gesture_confidence: float | None
-    # 템플릿 조회에 실제로 쓴 제스처 (USE_GESTURE_CLASSIFIER에 따라 예측값 또는 요청값)
+    # 템플릿 조회에 쓴 제스처 (앱이 보낸 gestureId)
     gesture_id: str | None
     model_version: str
     latency_ms: int
@@ -135,10 +137,10 @@ class AuthLogOut(ResponseModel):
     user_name: str | None
     department: str | None
     claimed_gesture_id: str | None
-    predicted_gesture_id: str | None
-    gesture_confidence: float | None
     score: float | None
     threshold: float | None
+    gesture_score: float | None
+    gesture_threshold: float | None
     passed: bool | None
     fail_reason: str | None
     auth_model_version: str | None
@@ -180,23 +182,23 @@ class ConfigPatch(CamelModel):
 
 class HealthOut(ResponseModel):
     status: str
-    model_version: str | None            # DB의 활성 인증 모델 버전
+    model_version: str | None            # DB의 활성 모델 버전
     loaded_model_version: str             # 프로세스에 로드된 ai.encoder.MODEL_VERSION
-    gesture_model_version: str
-    active_threshold: float | None
+    active_threshold: float | None        # user 관문 (Tu)
+    active_gesture_threshold: float | None  # gesture 관문 (Tg)
     active_threshold_basis: str | None
-    use_gesture_classifier: bool
     db_ok: bool
 
 
 # --- /admin ---------------------------------------------------------------------
 
 class ThresholdSwitchRequest(CamelModel):
-    basis: str = Field(min_length=1)  # far1 | eer | far5
+    basis: str = Field(min_length=1)  # default | demo_relaxed
 
 
 class ThresholdOut(ResponseModel):
     basis: str | None
+    gate: str  # user | gesture
     value: float
     far: float | None
     frr: float | None

@@ -72,19 +72,6 @@ def enroll_same_body(user_id: str = "kim", gesture_id: str = "G1", seed: int = 0
     return enroll_body(user_id, gesture_id, seeds=(seed, seed, seed))
 
 
-def predicted_gesture(seed: int = 0) -> str:
-    """verify_body(seed=seed)에 대해 제스처 모델이 예측하는 제스처.
-
-    USE_GESTURE_CLASSIFIER=true 모드 테스트에서만 필요하다.
-    """
-    from ai import encoder
-    from app import schemas
-    from app.services.ai_gateway import to_ai_input
-
-    req = schemas.VerifyRequest.model_validate(verify_body(seed=seed))
-    return encoder.classify_gesture(to_ai_input(req.camera, req.frames))[0]
-
-
 def left_hand(frames: list[dict]) -> list[dict]:
     return [{**f, "handedness": "Left"} for f in frames]
 

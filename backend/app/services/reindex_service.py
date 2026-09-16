@@ -28,7 +28,7 @@ from app.models import Embedding, Enrollment
 from app.schemas import ReindexFailure, ReindexRequest, ReindexResponse, SequencePayload
 from app.services import app_config_service as cfg
 from app.services import template_service, threshold_service
-from app.services.ai_gateway import to_ai_input
+from app.services.ai_gateway import embed_both_batch, to_ai_input
 
 log = logging.getLogger(__name__)
 
@@ -48,8 +48,13 @@ def _failure(row: _Row, error: Exception | str) -> ReindexFailure:
     )
 
 
-def _embed_group(rows: list[_Row]) -> tuple[np.ndarray | None, list[ReindexFailure]]:
-    """(user, gesture) 한 묶음. 하나라도 실패하면 그 묶음의 템플릿은 만들 수 없다."""
+def _embed_group(
+    rows: list[_Row],
+) -> tuple[tuple[np.ndarray, np.ndarray] | None, list[ReindexFailure]]:
+    """(user, gesture) 한 묶음. 하나라도 실패하면 그 묶음의 템플릿은 만들 수 없다.
+
+    dual-head라 임베딩이 user·gesture 두 벌 나온다.
+    """
     inputs, failures = [], []
     for row in rows:
         try:
@@ -61,15 +66,20 @@ def _embed_group(rows: list[_Row]) -> tuple[np.ndarray | None, list[ReindexFailu
         return None, failures
 
     try:
-        vectors = np.asarray(encoder.embed_batch(inputs), dtype=np.float32)
-        if vectors.shape != (len(rows), encoder.EMBEDDING_DIM):
-            raise RuntimeError(f"embed_batch returned shape {vectors.shape}")
-        return vectors, []
+        user_vectors, gesture_vectors = embed_both_batch(inputs)
+        expected = (len(rows), encoder.EMBEDDING_DIM)
+        user_vectors = np.asarray(user_vectors, dtype=np.float32)
+        gesture_vectors = np.asarray(gesture_vectors, dtype=np.float32)
+        if user_vectors.shape != expected or gesture_vectors.shape != expected:
+            raise RuntimeError(
+                f"embed_both_batch returned {user_vectors.shape} / {gesture_vectors.shape}"
+            )
+        return (user_vectors, gesture_vectors), []
     except Exception as batch_exc:
         # 어느 건이 문제인지 하나씩 찾는다
         for row, item in zip(rows, inputs):
             try:
-                encoder.embed(item)
+                encoder.embed_both(item)
             except Exception as exc:
                 failures.append(_failure(row, exc))
         if not failures:
@@ -85,10 +95,11 @@ def reindex(session: Session, req: ReindexRequest) -> ReindexResponse:
             400, "bad_request", "model_version_mismatch",
             f"로드된 인코더 버전은 {encoder.MODEL_VERSION}입니다. 요청한 버전({to_version})과 다릅니다.",
         )
-    if threshold_service.get_active(session, to_version) is None:
+    if threshold_service.get_active_pair(session, to_version) is None:
         raise ApiError(
             409, "conflict", "no_active_threshold",
-            f"{to_version}의 활성 threshold가 없습니다. 전환하면 인증이 불가능해지므로 중단합니다.",
+            f"{to_version}의 활성 threshold(user/gesture 쌍)가 없습니다. "
+            "전환하면 인증이 불가능해지므로 중단합니다.",
         )
     from_version = cfg.get_active_model_version(session)
 
@@ -105,7 +116,7 @@ def reindex(session: Session, req: ReindexRequest) -> ReindexResponse:
     for row in rows:
         groups[(row.user_id, row.gesture_id)].append(row)
 
-    results: dict[tuple[str, str], np.ndarray] = {}
+    results: dict[tuple[str, str], tuple[np.ndarray, np.ndarray]] = {}
     failures: list[ReindexFailure] = []
     for key, group in groups.items():
         vectors, group_failures = _embed_group(group)
@@ -125,16 +136,20 @@ def reindex(session: Session, req: ReindexRequest) -> ReindexResponse:
                         Embedding.enrollment_id.in_(ids), Embedding.model_version == to_version
                     )
                 )
-            for key, vectors in results.items():
-                for row, vec in zip(groups[key], vectors):
-                    session.add(
-                        Embedding(
-                            enrollment_id=row.enrollment_id,
-                            model_version=to_version,
-                            vector=template_service.to_blob(vec),
+            for key, (user_vectors, gesture_vectors) in results.items():
+                for kind, vectors in (("user", user_vectors), ("gesture", gesture_vectors)):
+                    for row, vec in zip(groups[key], vectors):
+                        session.add(
+                            Embedding(
+                                enrollment_id=row.enrollment_id,
+                                model_version=to_version,
+                                kind=kind,
+                                vector=template_service.to_blob(vec),
+                            )
                         )
+                    template_service.upsert_template(
+                        session, key[0], key[1], to_version, vectors, kind=kind
                     )
-                template_service.upsert_template(session, key[0], key[1], to_version, vectors)
             cfg.set_value(session, cfg.ACTIVE_MODEL_VERSION, to_version)  # 전부 성공한 뒤에만
             session.commit()
             switched = True

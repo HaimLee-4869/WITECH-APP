@@ -38,22 +38,27 @@ def load_thresholds(
             "%s는 %s용 값인데 %s에 넣는다. scripts/import_thresholds.py로 갱신했는지 확인할 것.",
             path.name, data["modelVersion"], model_version,
         )
-    points = data["operatingPoints"]
-    for p in points:
-        session.add(
-            Threshold(
-                scheme=data.get("scheme", "global"),
-                gesture_id=None,
-                model_version=model_version,
-                value=float(p["value"]),
-                far=p.get("far"),
-                frr=p.get("frr"),
-                basis=p["basis"],
-                is_active=p["basis"] == data.get("defaultBasis", "far1"),
+    default_basis = data.get("defaultBasis", "default")
+    rows = 0
+    for point in data["operatingPoints"]:
+        # dual-head: 운영점 하나가 user/gesture 두 행이 된다.
+        for gate in ("user", "gesture"):
+            session.add(
+                Threshold(
+                    scheme=data.get("scheme", "global"),
+                    gate=gate,
+                    gesture_id=None,
+                    model_version=model_version,
+                    value=float(point[f"{gate}Threshold"]),
+                    far=point.get(f"{gate}Far"),
+                    frr=point.get(f"{gate}Frr"),
+                    basis=point["basis"],
+                    is_active=point["basis"] == default_basis,
+                )
             )
-        )
-    log.info("thresholds %d개를 model_version=%s 로 추가 (%s)", len(points), model_version, path.name)
-    return len(points)
+            rows += 1
+    log.info("thresholds %d행을 model_version=%s 로 추가 (%s)", rows, model_version, path.name)
+    return rows
 
 
 def ensure_seed_data(session: Session) -> None:

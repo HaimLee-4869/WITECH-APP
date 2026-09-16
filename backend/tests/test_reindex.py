@@ -21,7 +21,7 @@ from app.services.ai_gateway import to_ai_input
 from tests.conftest import post_json
 from tests.payloads import enroll_body, enroll_same_body, verify_body
 
-OLD, NEW = encoder.MODEL_VERSION, "handonly-supcon-v1.1.0"
+OLD, NEW = encoder.MODEL_VERSION, "shared-dual-head-v1.2.0"
 GESTURE, SECOND_GESTURE = "G3", "G5"
 
 
@@ -31,8 +31,8 @@ def _swap_encoder(monkeypatch, fail_on=None):
     제스처 모델은 그대로 둔다. fail_on: 이 camera width를 가진 입력에서 실패.
     """
     rotation = np.linalg.qr(np.random.default_rng(99).normal(size=(128, 128)))[0].astype(np.float32)
-    original_embed = encoder.embed
-    original_batch = encoder.embed_batch
+    original_both = encoder.embed_both
+    original_both_batch = encoder.embed_both_batch
 
     def rotate(vectors):
         out = np.atleast_2d(vectors) @ rotation.T
@@ -43,20 +43,27 @@ def _swap_encoder(monkeypatch, fail_on=None):
         if fail_on is not None and payload.get("width") == fail_on:
             raise RuntimeError("weights corrupted")
 
-    def new_embed(frames):
-        check(frames)
-        return rotate(original_embed(frames))[0]
+    def new_both(payload):
+        check(payload)
+        result = original_both(payload)
+        return {
+            "user_embedding": rotate(result["user_embedding"])[0],
+            "gesture_embedding": rotate(result["gesture_embedding"])[0],
+        }
 
-    def new_embed_batch(list_of_frames):
-        for payload in list_of_frames:
+    def new_both_batch(payloads):
+        for payload in payloads:
             check(payload)
-        result = original_batch(list_of_frames)
-        return rotate(result) if len(result) else result
+        result = original_both_batch(payloads)
+        return {
+            "user_embeddings": rotate(result["user_embeddings"]),
+            "gesture_embeddings": rotate(result["gesture_embeddings"]),
+        }
 
     monkeypatch.setattr(encoder, "MODEL_VERSION", NEW)
-    # 실제 모듈의 embed_batch는 embed를 호출하지 않으므로 둘 다 바꾼다
-    monkeypatch.setattr(encoder, "embed", new_embed)
-    monkeypatch.setattr(encoder, "embed_batch", new_embed_batch)
+    # 실제 모듈의 batch는 단건을 호출하지 않으므로 둘 다 바꾼다
+    monkeypatch.setattr(encoder, "embed_both", new_both)
+    monkeypatch.setattr(encoder, "embed_both_batch", new_both_batch)
 
 
 def _enroll_users(client):
@@ -106,7 +113,7 @@ def test_reindex_updates_all_templates(settings, monkeypatch):
         data = res.json()
         assert data["fromVersion"] == OLD and data["toVersion"] == NEW
         assert data["enrollmentsProcessed"] == 12
-        assert data["templatesRebuilt"] == 4
+        assert data["templatesRebuilt"] == 4  # (user, gesture) 조합 4개
         assert data["failed"] == 0 and data["switched"] is True and data["failures"] == []
 
         with db.session() as s:
@@ -115,7 +122,9 @@ def test_reindex_updates_all_templates(settings, monkeypatch):
             keys_old = {(t.user_id, t.gesture_id) for t in s.scalars(
                 select(models.Template).where(models.Template.model_version == OLD))}
             assert keys_new == keys_old and len(keys_new) == 4   # 모든 템플릿이 새 버전으로
-            assert s.query(models.Embedding).filter_by(model_version=NEW).count() == 12
+            # dual-head: 원본 12건 × (user, gesture)
+            assert s.query(models.Embedding).filter_by(model_version=NEW).count() == 24
+            assert s.query(models.Template).filter_by(model_version=NEW).count() == 8
             for t in s.scalars(select(models.Template).where(models.Template.model_version == NEW)):
                 assert np.linalg.norm(template_service.from_blob(t.centroid)) == pytest.approx(1.0, abs=1e-6)
 
@@ -137,8 +146,8 @@ def test_reindex_new_centroid_matches_new_space(settings, monkeypatch):
     with _restart(settings) as c:
         c.post("/admin/reindex", json={"modelVersion": NEW})
         with c.app.state.db.session() as s:
-            old = template_service.get_template(s, "kim", SECOND_GESTURE, OLD)
-            new = template_service.get_template(s, "kim", SECOND_GESTURE, NEW)
+            old = template_service.get_template(s, "kim", SECOND_GESTURE, OLD, kind="user")
+            new = template_service.get_template(s, "kim", SECOND_GESTURE, NEW, kind="user")
             group = s.scalars(
                 select(models.Enrollment)
                 .where(models.Enrollment.user_id == "kim", models.Enrollment.gesture_id == SECOND_GESTURE)
@@ -148,7 +157,9 @@ def test_reindex_new_centroid_matches_new_space(settings, monkeypatch):
         for r in group:
             p = SequencePayload.model_validate(json.loads(r.landmarks_json))
             inputs.append(to_ai_input(p.camera, p.frames))
-        expected = template_service.build_centroid(encoder.embed_batch(inputs))
+        expected = template_service.build_centroid(
+            encoder.embed_both_batch(inputs)["user_embeddings"]
+        )
         assert np.allclose(new, expected, atol=1e-6)
         assert not np.allclose(new, old, atol=1e-3)
 
@@ -184,7 +195,7 @@ def test_failed_same_version_reindex_keeps_auth_working(client, db, monkeypatch)
     gesture = _enroll_users(client)
     before = _snapshot(db)
     calls = {"n": 0}
-    original = encoder.embed_batch
+    original = encoder.embed_both_batch
 
     def flaky(items):
         calls["n"] += 1
@@ -192,8 +203,10 @@ def test_failed_same_version_reindex_keeps_auth_working(client, db, monkeypatch)
             raise RuntimeError("OOM")
         return original(items)
 
-    monkeypatch.setattr(encoder, "embed_batch", flaky)
-    monkeypatch.setattr(encoder, "embed", lambda f: (_ for _ in ()).throw(RuntimeError("OOM")))
+    monkeypatch.setattr(encoder, "embed_both_batch", flaky)
+    monkeypatch.setattr(
+        encoder, "embed_both", lambda f: (_ for _ in ()).throw(RuntimeError("OOM"))
+    )
     res = client.post("/admin/reindex", json={"modelVersion": OLD}).json()
     assert res["failed"] > 0 and res["switched"] is False
     monkeypatch.undo()
