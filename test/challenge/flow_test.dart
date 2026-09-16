@@ -33,6 +33,19 @@ class ScriptedSource implements LandmarkSource {
   bool started = false;
   bool stopped = false;
 
+  /// 프레임에 실을 신뢰도.
+  ///
+  /// 기본값은 실기기와 같다. `OnDeviceLandmarkSource`는 신뢰도를 **측정하지
+  /// 못하면서도** `minHandDetectionConfidence`(0.6)를 하한값으로 채워 넣는다.
+  /// 이 값을 null로 두면 실기기에서만 터지는 경로를 테스트가 못 본다.
+  double? detectionScore = 0.6;
+
+  /// [detectionScore]가 **측정된** 값인지. false면 하한값일 뿐이다.
+  bool scoreIsMeasured = false;
+
+  @override
+  bool get providesDetectionScore => scoreIsMeasured;
+
   @override
   Stream<HandFrame> get frames => _controller.stream;
 
@@ -66,6 +79,7 @@ class ScriptedSource implements LandmarkSource {
           // 손 모델은 원점 근처의 ±1 좌표다. 화면 한가운데로 옮기고 줄인다.
           Landmark(0.5 + p[0] * 0.12, 0.5 + p[1] * 0.12, p[2] * 0.12),
       ],
+      score: detectionScore,
     ));
   }
 
@@ -252,6 +266,67 @@ void main() {
     controller().cancel();
     expect(flow().phase, ChallengePhase.idle);
     expect(source.stopped, isTrue);
+  });
+
+  // ─── 회귀: 실기기에서 TRACKING_UNSTABLE이 계속 뜨던 문제 ──────────────
+  //
+  // OnDeviceLandmarkSource는 신뢰도를 **측정하지 못하면서도** score에
+  // minHandDetectionConfidence(0.6)를 하한값으로 채워 넣는다. 그 0.6이
+  // minDetectionScore(0.938)와 비교되어 매 프레임 미달로 판정됐다.
+  //
+  // 0.6은 "이 값 이상"이라는 뜻이지 측정된 신뢰도가 아니다. 도출된 임계값
+  // (정상 영상 검출 프레임 p5=0.938)과 비교할 수 있는 값이 아니다.
+  test('신뢰도 하한값(0.6)만 있는 소스에서도 끝까지 돈다', () async {
+    source.detectionScore = 0.6; // 실기기와 같은 조건
+
+    await controller().begin();
+    for (final String action in flow().actions) {
+      final Status? status = flow().status;
+      if (status != null && status.awaitingEscape) {
+        await perform(
+          status.escapeFrom == 'FIST' ? 'OPEN_PALM' : 'FIST',
+          maxFrames: 30,
+        );
+      }
+      await perform(action);
+      if (flow().finished) break;
+    }
+
+    expect(
+      flow().status?.failReason,
+      isNot(FailReason.trackingUnstable),
+      reason: '측정하지 않은 하한값을 신뢰도 관문에 넣으면 안 된다',
+    );
+    expect(flow().phase, ChallengePhase.passed);
+  });
+
+  test('진짜로 측정된 낮은 신뢰도는 여전히 거른다', () async {
+    // 하한값을 무시한다고 관문 자체를 없애면, 플러그인이 진짜 신뢰도를 주게
+    // 됐을 때 아무것도 안 걸러진다.
+    source.detectionScore = 0.5;
+    source.scoreIsMeasured = true;
+
+    await controller().begin();
+    final String first = flow().actions.first;
+    final Coords hand =
+        sketchForShape(kShapePatterns.containsKey(first) ? first : 'OPEN_PALM',
+                config)
+            .landmarks;
+
+    // 프레임 수가 아니라 벽시계로 돈다. 관문이 시간 기준이라 전체 테스트가
+    // 붙어 돌 때는 같은 프레임 수가 다른 시간이 된다.
+    final Stopwatch clock = Stopwatch()..start();
+    int i = 0;
+    while (!flow().finished && clock.elapsed < const Duration(seconds: 6)) {
+      source.emitHand(hand, tMs: i++ * 20);
+      await Future<void>.delayed(const Duration(milliseconds: 12));
+    }
+
+    expect(
+      flow().status?.failReason,
+      FailReason.trackingUnstable,
+      reason: '${clock.elapsedMilliseconds}ms, $i프레임 뒤 상태=${flow().phase}',
+    );
   });
 }
 

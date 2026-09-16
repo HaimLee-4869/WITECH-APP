@@ -234,15 +234,19 @@ def run_script(actions, script, config=None):
     t = 0.0
     status = None
     for step in script:
+        # score가 없으면 1.0. None(=Dart의 null)은 '측정하지 못했다'는 뜻이고
+        # 파이썬에서는 NaN으로 들어간다. 양쪽이 이때 관문을 건너뛰어야 한다.
+        raw_score = step.get("score", 1.0)
+        score = float("nan") if raw_score is None else float(raw_score)
         for i in range(step["frames"]):
             kind = step["kind"]
             if kind == "shape":
                 hand = pattern_hand(SHAPE_PATTERNS[step["label"]])
-                obs = Observation(t, True, 1.0, hand, hand)
+                obs = Observation(t, True, score, hand, hand)
             elif kind == "move":
                 hand = make_hand(180.0, center=(step["dx"] * i * 0.4,
                                                 step["dy"] * i * 0.4, 0.0))
-                obs = Observation(t, True, 1.0, hand, hand)
+                obs = Observation(t, True, score, hand, hand)
             else:  # lost
                 obs = Observation(t, False)
             status = machine.update(obs)
@@ -292,6 +296,21 @@ def sequence_cases():
          "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
          "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": 2},
                     {"kind": "lost", "frames": 20}]},
+        # --- 추적 신뢰도 관문 ---
+        # 2026-09-17 실기기에서 TRACKING_UNSTABLE만 뜨던 버그의 회귀 케이스다.
+        # score를 모를 때(None/NaN) 관문을 건너뛰는지, 진짜 낮은 값은 거르는지.
+        {"name": "unknown_score_skips_tracking_gate",
+         "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
+         "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": hold,
+                     "score": None}]},
+        {"name": "low_measured_score_fails",
+         "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
+         "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": 20,
+                     "score": 0.3}]},
+        {"name": "score_at_threshold_passes",
+         "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
+         "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": hold,
+                     "score": CONFIG["tracking"]["min_detection_score"]}]},
     ]
 
     out = []

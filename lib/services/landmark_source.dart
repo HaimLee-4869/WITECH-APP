@@ -72,6 +72,20 @@ abstract class LandmarkSource {
   /// 오버레이 좌표 변환 파라미터.
   LandmarkTransform get transform;
 
+  /// [HandFrame.score]가 **실제로 측정된 검출 신뢰도**인지.
+  ///
+  /// false면 값이 있어도 그것은 하한값이다. `hand_landmarker` 3.0.1은 신뢰도를
+  /// 주지 않아서, 앱은 플러그인에 설정한 `minHandDetectionConfidence`(0.6)를
+  /// "이 값 이상"이라는 뜻으로 기록한다.
+  ///
+  /// **하한값을 임계값과 비교하면 안 된다.** 안티스푸핑 Challenge의
+  /// `minDetectionScore`(0.938)는 실제 검출 신뢰도 분포의 p5에서 나온 값이라,
+  /// 0.6과 비교하면 모든 프레임이 미달이 된다(실기기에서 `TRACKING_UNSTABLE`이
+  /// 계속 뜬 원인이다). 이 값이 false면 신뢰도 관문 자체를 걸지 않는다.
+  ///
+  /// 플러그인이 진짜 신뢰도를 주게 되면 true로 바꾸면 관문이 살아난다.
+  bool get providesDetectionScore;
+
   /// **검출에 넣은 이미지**의 해상도. 아직 모르면 null.
   ///
   /// 서버가 학습 때와 같은 종횡비 보정을 하려면 이 값이 필요하다. 없으면 422

@@ -207,6 +207,11 @@ void main() {
         for (final dynamic stepRaw in c['script'] as List<dynamic>) {
           final Map<String, dynamic> step = stepRaw as Map<String, dynamic>;
           final int frames = (step['frames'] as num).toInt();
+          // score가 없으면 1.0. JSON의 null은 '측정하지 못했다'는 뜻이고
+          // 파이썬 쪽에서는 NaN으로 들어간다. 양쪽이 관문을 건너뛰어야 한다.
+          final double? score = step.containsKey('score')
+              ? (step['score'] as num?)?.toDouble()
+              : 1.0;
           for (int i = 0; i < frames; i++) {
             final Observation obs;
             switch (step['kind'] as String) {
@@ -216,7 +221,7 @@ void main() {
                 obs = Observation(
                   timestampMs: t,
                   handFound: true,
-                  detectionScore: 1.0,
+                  detectionScore: score,
                   angleCoords: hand,
                   screenCoords: hand,
                 );
@@ -232,7 +237,7 @@ void main() {
                 obs = Observation(
                   timestampMs: t,
                   handFound: true,
-                  detectionScore: 1.0,
+                  detectionScore: score,
                   angleCoords: hand,
                   screenCoords: hand,
                 );

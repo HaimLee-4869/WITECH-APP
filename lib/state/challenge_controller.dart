@@ -260,8 +260,16 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
       Observation(
         timestampMs: _clock.elapsedMilliseconds.toDouble(),
         handFound: true,
-        // 플러그인이 신뢰도를 주지 않으면 null이다. 상태 머신이 관문을 건너뛴다.
-        detectionScore: frame.score,
+        // ⚠️ 측정된 신뢰도일 때만 넘긴다.
+        //
+        // OnDeviceLandmarkSource는 신뢰도를 측정하지 못하면서도 score에
+        // minHandDetectionConfidence(0.6)를 **하한값으로** 채워 넣는다.
+        // 그 0.6을 minDetectionScore(0.938, 실제 신뢰도 분포의 p5)와 비교하면
+        // 매 프레임 미달이 되어 실기기에서 TRACKING_UNSTABLE만 떴다.
+        //
+        // "0.6 이상"과 "0.6"은 다른 말이다. 측정하지 않은 값으로 관문을 통과시킬
+        // 수도, 떨어뜨릴 수도 없다. null을 주면 상태 머신이 관문을 건너뛴다.
+        detectionScore: _source.providesDetectionScore ? frame.score : null,
         angleCoords: screen, // angleSpace=image_iso
         screenCoords: screen,
       ),

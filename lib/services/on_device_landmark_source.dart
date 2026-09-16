@@ -178,6 +178,11 @@ class OnDeviceLandmarkSource implements LandmarkSource {
     );
   }
 
+  /// 이 플러그인은 검출 신뢰도를 주지 않는다. score에 넣는 값은 측정값이 아니라
+  /// minHandDetectionConfidence 하한이다. (landmark_source.dart 참고)
+  @override
+  bool get providesDetectionScore => false;
+
   @override
   LandmarkTransform get transform {
     final camera = _camera;

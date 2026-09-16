@@ -1323,6 +1323,78 @@
         false,
         false
       ]
+    },
+    {
+      "name": "unknown_score_skips_tracking_gate",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5,
+          "score": null
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 1,
+      "stepsPassed": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "low_measured_score_fails",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 20,
+          "score": 0.3
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "TRACKING_UNSTABLE",
+      "stepIndex": 0,
+      "stepsPassed": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "score_at_threshold_passes",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5,
+          "score": 0.5
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 1,
+      "stepsPassed": [
+        true,
+        false,
+        false
+      ]
     }
   ]
 }

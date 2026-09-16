@@ -44,6 +44,10 @@ class FakeLandmarkSource implements LandmarkSource {
   @override
   LandmarkTransform get transform => const LandmarkTransform();
 
+  /// 가짜 소스는 신뢰도를 만들어 내지 않는다.
+  @override
+  bool get providesDetectionScore => false;
+
   @override
   Future<void> start() async {
     if (_disposed || _timer != null) return;

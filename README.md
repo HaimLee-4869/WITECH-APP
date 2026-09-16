@@ -386,12 +386,34 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
 `handReady` 판정에서 겪었다. `test/challenge/time_based_frames_test.dart`가 14fps와
 30fps에서 같은 시간이 걸리는지 확인한다.
 
+### 겪은 버그: 하한값을 임계값과 비교한 것
+
+실기기에서 Challenge가 매번 `TRACKING_UNSTABLE`로 끝났다. 원인은 null 처리가 아니라
+**앱이 측정하지 않은 값을 score에 채워 넣은 것**이었다.
+
+```
+OnDeviceLandmarkSource  score = 0.6   ← minHandDetectionConfidence 하한값
+challenge 설정          0.938         ← 정상 영상 검출 신뢰도 분포의 p5
+0.6 < 0.938 → 매 프레임 미달 → TRACKING_UNSTABLE
+```
+
+"0.6 이상"과 "0.6"은 다른 말이다. 서버로 보내는 payload에는 하한값이 유용하지만
+(플러그인이 그 미만을 버리므로 참인 정보다), **임계값과 비교하는 자리에 넣으면
+거짓이 된다.** `LandmarkSource.providesDetectionScore`로 "이게 측정값인가"를
+소스가 직접 선언하게 하고, false면 관문을 건너뛴다.
+
+교차검증 골든은 이걸 못 잡았다. 골든은 상태 머신에 [Observation]을 직접 넣어
+파이썬과 대조하는데, 버그는 **프레임 → Observation으로 옮기는 컨트롤러 층**에
+있었고 그 층은 골든 범위 밖이다. 게다가 골든의 모든 케이스가 `score=1.0`이라
+관문 자체가 한 번도 눌리지 않았다. 지금은 골든에 `score=None`·낮은 값·경계값
+3건을 넣었고, `flow_test.dart`의 가짜 소스도 실기기와 같은 0.6을 흘린다.
+
 ### Challenge의 알려진 한계
 
 | 한계 | 상세 |
 |---|---|
 | **앱 판정** | 앱을 조작하면 우회된다. 서버가 검증하지 않는다 (위 참고) |
-| **검출 신뢰도 관문이 꺼져 있다** | `minDetectionScore=0.938`을 받지만 `hand_landmarker` 3.0.1이 신뢰도를 주지 않아 `HandFrame.score`가 항상 null이다. 판정기는 값이 있을 때만 이 관문을 보므로 **`TRACKING_UNSTABLE`은 앱에서 절대 발생하지 않는다.** 흔들리는 손을 거를 관문 하나가 없는 상태다 |
+| **검출 신뢰도 관문이 꺼져 있다** | `minDetectionScore=0.938`을 받지만 `hand_landmarker` 3.0.1이 신뢰도를 주지 않는다. 앱은 `HandFrame.score`에 `minHandDetectionConfidence`(0.6)를 **하한값**으로 넣는데, 이건 "0.6 이상"이라는 뜻이지 측정값이 아니다. 측정하지 않은 값으로 관문을 판정할 수 없으므로 `LandmarkSource.providesDetectionScore`가 false인 소스는 관문을 건너뛴다. **결과적으로 `TRACKING_UNSTABLE`은 앱에서 발생하지 않고, 흔들리는 손을 거를 관문 하나가 없는 상태다.** 플러그인이 진짜 신뢰도를 주면 그 플래그만 true로 바꾸면 관문이 살아난다 |
 | **`maxLostFrames`가 측정값이 아니다** | 38은 임시값이다. 정상 영상의 중간 끊김이 1건뿐이라(최소 20건 필요) p95를 도출하지 못했고, 2026-09-16에 임시로 정한 값이다. 30fps 기준 1,267ms에 해당한다. **실사용 세션이 쌓이면 다시 재야 한다** |
 | 1단계에는 이탈 관문이 없다 | 시작 시점에 이미 1단계 손 모양이면 그대로 통과된다. 매번 시작 자세를 요구하는 비용이 더 크다고 봤다(challenge_response README 5.7). 2·3단계에는 관문이 있어 정지된 손 하나로 전체를 통과할 수는 없다 |
 | 이동 방향 근거가 좁다 | `directionMap`의 상하는 참가자 1명(P05)의 영상 4개에 기댄다 |

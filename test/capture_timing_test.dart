@@ -30,6 +30,10 @@ class _PacedSource implements LandmarkSource {
   @override
   LandmarkTransform get transform => const LandmarkTransform();
 
+  /// 테스트 소스는 신뢰도를 측정하지 않는다.
+  @override
+  bool get providesDetectionScore => false;
+
   @override
   Widget? buildPreview() => null;
 
