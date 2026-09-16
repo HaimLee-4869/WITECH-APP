@@ -1,0 +1,1328 @@
+{
+  "_note": "scripts/export_dart_golden.py가 만든 파이썬 실행 결과. 손으로 고치지 말 것.",
+  "ruleVersion": "2026-09-16.opposite-first-fails",
+  "fps": 30.0,
+  "escapeFrames": 4,
+  "extendedAngle": 175.0,
+  "curledAngle": 60.0,
+  "config": {
+    "ruleVersion": "2026-09-16.opposite-first-fails",
+    "angleSpace": "world",
+    "coordinateFrame": "raw",
+    "frameReferenceFps": 30.0,
+    "fingerExtendedAngle": {
+      "thumb": 150.0,
+      "others": 160.0
+    },
+    "fistMaxTipWristRatio": null,
+    "shapeHoldFrames": 5,
+    "shapeConfidenceMarginDeg": 20.0,
+    "shapeConfidenceMin": 0.5,
+    "escapeFrames": 4,
+    "movement": {
+      "windowMs": 400,
+      "minDisplacementRatio": 1.2,
+      "axisDominanceRatio": 2.0,
+      "maxDurationMs": 2500,
+      "restDisplacementRatio": 0.086,
+      "directionMap": {
+        "MOVE_LEFT": [
+          "x",
+          -1
+        ],
+        "MOVE_RIGHT": [
+          "x",
+          1
+        ],
+        "MOVE_UP": [
+          "y",
+          -1
+        ],
+        "MOVE_DOWN": [
+          "y",
+          1
+        ]
+      }
+    },
+    "timing": {
+      "perActionTimeoutMs": 2000,
+      "totalTimeoutMs": 20000,
+      "maxRetries": 0
+    },
+    "tracking": {
+      "maxLostFrames": 5,
+      "minDetectionScore": 0.5
+    },
+    "steps": {
+      "numShapes": 2,
+      "numMoves": 1
+    },
+    "shapePool": [
+      "OPEN_PALM",
+      "FIST",
+      "INDEX",
+      "TWO_FINGERS"
+    ],
+    "movePool": [
+      "MOVE_LEFT",
+      "MOVE_RIGHT",
+      "MOVE_UP",
+      "MOVE_DOWN"
+    ]
+  },
+  "synthSamples": [
+    {
+      "name": "open_180",
+      "params": {
+        "uniformAngle": 180.0
+      },
+      "landmarks": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.7,
+          -0.5,
+          0.0
+        ],
+        [
+          -0.7,
+          -0.95,
+          0.0
+        ],
+        [
+          -0.7,
+          -1.225,
+          0.0
+        ],
+        [
+          -0.7,
+          -1.5,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.0,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.45,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.725,
+          0.0
+        ],
+        [
+          -0.35,
+          -2.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.45,
+          0.0
+        ],
+        [
+          0.0,
+          -1.725,
+          0.0
+        ],
+        [
+          0.0,
+          -2.0,
+          0.0
+        ],
+        [
+          0.3,
+          -0.95,
+          0.0
+        ],
+        [
+          0.3,
+          -1.4,
+          0.0
+        ],
+        [
+          0.3,
+          -1.675,
+          0.0
+        ],
+        [
+          0.3,
+          -1.95,
+          0.0
+        ],
+        [
+          0.6,
+          -0.85,
+          0.0
+        ],
+        [
+          0.6,
+          -1.3,
+          0.0
+        ],
+        [
+          0.6,
+          -1.575,
+          0.0
+        ],
+        [
+          0.6,
+          -1.85,
+          0.0
+        ]
+      ]
+    },
+    {
+      "name": "curled_60",
+      "params": {
+        "uniformAngle": 60.0
+      },
+      "landmarks": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.7,
+          -0.5,
+          0.0
+        ],
+        [
+          -0.7,
+          -0.95,
+          0.0
+        ],
+        [
+          -0.461843014,
+          -0.8125,
+          0.0
+        ],
+        [
+          -0.223686028,
+          -0.675,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.0,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.45,
+          0.0
+        ],
+        [
+          -0.111843014,
+          -1.3125,
+          0.0
+        ],
+        [
+          0.126313972,
+          -1.175,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.45,
+          0.0
+        ],
+        [
+          0.238156986,
+          -1.3125,
+          0.0
+        ],
+        [
+          0.476313972,
+          -1.175,
+          0.0
+        ],
+        [
+          0.3,
+          -0.95,
+          0.0
+        ],
+        [
+          0.3,
+          -1.4,
+          0.0
+        ],
+        [
+          0.538156986,
+          -1.2625,
+          0.0
+        ],
+        [
+          0.776313972,
+          -1.125,
+          0.0
+        ],
+        [
+          0.6,
+          -0.85,
+          0.0
+        ],
+        [
+          0.6,
+          -1.3,
+          0.0
+        ],
+        [
+          0.838156986,
+          -1.1625,
+          0.0
+        ],
+        [
+          1.076313972,
+          -1.025,
+          0.0
+        ]
+      ]
+    },
+    {
+      "name": "scaled_shifted",
+      "params": {
+        "uniformAngle": 150.0,
+        "scale": 0.3,
+        "center": [
+          0.4,
+          0.7,
+          0.1
+        ]
+      },
+      "landmarks": [
+        [
+          0.4,
+          0.7,
+          0.1
+        ],
+        [
+          0.19,
+          0.55,
+          0.1
+        ],
+        [
+          0.19,
+          0.415,
+          0.1
+        ],
+        [
+          0.23125,
+          0.343552904,
+          0.1
+        ],
+        [
+          0.2725,
+          0.272105808,
+          0.1
+        ],
+        [
+          0.295,
+          0.4,
+          0.1
+        ],
+        [
+          0.295,
+          0.265,
+          0.1
+        ],
+        [
+          0.33625,
+          0.193552904,
+          0.1
+        ],
+        [
+          0.3775,
+          0.122105808,
+          0.1
+        ],
+        [
+          0.4,
+          0.4,
+          0.1
+        ],
+        [
+          0.4,
+          0.265,
+          0.1
+        ],
+        [
+          0.44125,
+          0.193552904,
+          0.1
+        ],
+        [
+          0.4825,
+          0.122105808,
+          0.1
+        ],
+        [
+          0.49,
+          0.415,
+          0.1
+        ],
+        [
+          0.49,
+          0.28,
+          0.1
+        ],
+        [
+          0.53125,
+          0.208552904,
+          0.1
+        ],
+        [
+          0.5725,
+          0.137105808,
+          0.1
+        ],
+        [
+          0.58,
+          0.445,
+          0.1
+        ],
+        [
+          0.58,
+          0.31,
+          0.1
+        ],
+        [
+          0.62125,
+          0.238552904,
+          0.1
+        ],
+        [
+          0.6625,
+          0.167105808,
+          0.1
+        ]
+      ]
+    },
+    {
+      "name": "mixed",
+      "params": {
+        "angles": {
+          "thumb": 100.0,
+          "index": 180.0,
+          "middle": 170.0,
+          "ring": 60.0,
+          "pinky": 50.0
+        }
+      },
+      "landmarks": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.7,
+          -0.5,
+          0.0
+        ],
+        [
+          -0.7,
+          -0.95,
+          0.0
+        ],
+        [
+          -0.429177868,
+          -0.997753249,
+          0.0
+        ],
+        [
+          -0.158355736,
+          -1.045506498,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.0,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.45,
+          0.0
+        ],
+        [
+          -0.35,
+          -1.725,
+          0.0
+        ],
+        [
+          -0.35,
+          -2.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.45,
+          0.0
+        ],
+        [
+          0.047753249,
+          -1.720822132,
+          0.0
+        ],
+        [
+          0.095506498,
+          -1.991644264,
+          0.0
+        ],
+        [
+          0.3,
+          -0.95,
+          0.0
+        ],
+        [
+          0.3,
+          -1.4,
+          0.0
+        ],
+        [
+          0.538156986,
+          -1.2625,
+          0.0
+        ],
+        [
+          0.776313972,
+          -1.125,
+          0.0
+        ],
+        [
+          0.6,
+          -0.85,
+          0.0
+        ],
+        [
+          0.6,
+          -1.3,
+          0.0
+        ],
+        [
+          0.810662222,
+          -1.123233407,
+          0.0
+        ],
+        [
+          1.021324444,
+          -0.946466815,
+          0.0
+        ]
+      ]
+    }
+  ],
+  "shapeCases": [
+    {
+      "name": "pattern_OPEN_PALM",
+      "flags": [
+        true,
+        true,
+        true,
+        true
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "OPEN_PALM",
+      "confidence": 0.75,
+      "tipWristRatio": 1.989010172,
+      "flagsOut": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "angles": [
+        175.0,
+        175.0,
+        175.0,
+        175.0,
+        175.0
+      ]
+    },
+    {
+      "name": "pattern_FIST",
+      "flags": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "FIST",
+      "confidence": 1.0,
+      "tipWristRatio": 1.325697993,
+      "flagsOut": [
+        true,
+        false,
+        false,
+        false,
+        false
+      ],
+      "angles": [
+        175.0,
+        60.0,
+        60.0,
+        60.0,
+        60.0
+      ]
+    },
+    {
+      "name": "pattern_INDEX",
+      "flags": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "INDEX",
+      "confidence": 0.75,
+      "tipWristRatio": 1.535408674,
+      "flagsOut": [
+        true,
+        true,
+        false,
+        false,
+        false
+      ],
+      "angles": [
+        175.0,
+        175.0,
+        60.0,
+        60.0,
+        60.0
+      ]
+    },
+    {
+      "name": "pattern_TWO_FINGERS",
+      "flags": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "TWO_FINGERS",
+      "confidence": 0.75,
+      "tipWristRatio": 1.71806113,
+      "flagsOut": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "angles": [
+        175.0,
+        175.0,
+        175.0,
+        60.0,
+        60.0
+      ]
+    },
+    {
+      "name": "undeclared_TTTF",
+      "flags": [
+        true,
+        true,
+        true,
+        false
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "UNKNOWN",
+      "confidence": 0.75,
+      "tipWristRatio": 1.871032085,
+      "flagsOut": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "angles": [
+        175.0,
+        175.0,
+        175.0,
+        175.0,
+        60.0
+      ]
+    },
+    {
+      "name": "undeclared_TFTF",
+      "flags": [
+        true,
+        false,
+        true,
+        false
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "UNKNOWN",
+      "confidence": 0.75,
+      "tipWristRatio": 1.688379629,
+      "flagsOut": [
+        true,
+        true,
+        false,
+        true,
+        false
+      ],
+      "angles": [
+        175.0,
+        175.0,
+        60.0,
+        175.0,
+        60.0
+      ]
+    },
+    {
+      "name": "undeclared_TFFT",
+      "flags": [
+        true,
+        false,
+        false,
+        true
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "UNKNOWN",
+      "confidence": 0.75,
+      "tipWristRatio": 1.653386761,
+      "flagsOut": [
+        true,
+        true,
+        false,
+        false,
+        true
+      ],
+      "angles": [
+        175.0,
+        175.0,
+        60.0,
+        60.0,
+        175.0
+      ]
+    },
+    {
+      "name": "undeclared_FTFF",
+      "flags": [
+        false,
+        true,
+        false,
+        false
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "UNKNOWN",
+      "confidence": 0.75,
+      "tipWristRatio": 1.508350449,
+      "flagsOut": [
+        true,
+        false,
+        true,
+        false,
+        false
+      ],
+      "angles": [
+        175.0,
+        60.0,
+        175.0,
+        60.0,
+        60.0
+      ]
+    },
+    {
+      "name": "undeclared_FFTT",
+      "flags": [
+        false,
+        false,
+        true,
+        true
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "UNKNOWN",
+      "confidence": 0.75,
+      "tipWristRatio": 1.596647035,
+      "flagsOut": [
+        true,
+        false,
+        false,
+        true,
+        true
+      ],
+      "angles": [
+        175.0,
+        60.0,
+        60.0,
+        175.0,
+        175.0
+      ]
+    },
+    {
+      "name": "undeclared_FTTT",
+      "flags": [
+        false,
+        true,
+        true,
+        true
+      ],
+      "thumb": true,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "UNKNOWN",
+      "confidence": 0.75,
+      "tipWristRatio": 1.779299492,
+      "flagsOut": [
+        true,
+        false,
+        true,
+        true,
+        true
+      ],
+      "angles": [
+        175.0,
+        60.0,
+        175.0,
+        175.0,
+        175.0
+      ]
+    },
+    {
+      "name": "thumb_curled_two_fingers",
+      "flags": [
+        true,
+        true,
+        false,
+        false
+      ],
+      "thumb": false,
+      "scale": 1.0,
+      "center": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "label": "TWO_FINGERS",
+      "confidence": 0.75,
+      "tipWristRatio": 1.71806113,
+      "flagsOut": [
+        false,
+        true,
+        true,
+        false,
+        false
+      ],
+      "angles": [
+        60.0,
+        175.0,
+        175.0,
+        60.0,
+        60.0
+      ]
+    },
+    {
+      "name": "far_small_index",
+      "flags": [
+        true,
+        false,
+        false,
+        false
+      ],
+      "thumb": true,
+      "scale": 0.25,
+      "center": [
+        0.8,
+        0.6,
+        0.2
+      ],
+      "label": "INDEX",
+      "confidence": 0.75,
+      "tipWristRatio": 1.535408674,
+      "flagsOut": [
+        true,
+        true,
+        false,
+        false,
+        false
+      ],
+      "angles": [
+        175.0,
+        175.0,
+        60.0,
+        60.0,
+        60.0
+      ]
+    }
+  ],
+  "moveCases": [
+    {
+      "name": "right",
+      "dx": 3.0,
+      "dy": 0.0,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "MOVE_RIGHT",
+      "reason": "OK",
+      "displacementRatio": 3.0,
+      "axisRatio": "Infinity",
+      "axis": "x",
+      "sign": 1
+    },
+    {
+      "name": "left",
+      "dx": -3.0,
+      "dy": 0.0,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "MOVE_LEFT",
+      "reason": "OK",
+      "displacementRatio": 3.0,
+      "axisRatio": "Infinity",
+      "axis": "x",
+      "sign": -1
+    },
+    {
+      "name": "up",
+      "dx": 0.0,
+      "dy": -3.0,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "MOVE_UP",
+      "reason": "OK",
+      "displacementRatio": 3.0,
+      "axisRatio": "Infinity",
+      "axis": "y",
+      "sign": -1
+    },
+    {
+      "name": "down",
+      "dx": 0.0,
+      "dy": 3.0,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "MOVE_DOWN",
+      "reason": "OK",
+      "displacementRatio": 3.0,
+      "axisRatio": "Infinity",
+      "axis": "y",
+      "sign": 1
+    },
+    {
+      "name": "diagonal_45",
+      "dx": 3.0,
+      "dy": 3.0,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "NONE",
+      "reason": "NOT_AXIS_DOMINANT",
+      "displacementRatio": 4.242640687,
+      "axisRatio": 1.0,
+      "axis": "x",
+      "sign": 1
+    },
+    {
+      "name": "diagonal_just_under",
+      "dx": 3.0,
+      "dy": 1.6666666666666665,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "NONE",
+      "reason": "NOT_AXIS_DOMINANT",
+      "displacementRatio": 3.431876714,
+      "axisRatio": 1.8,
+      "axis": "x",
+      "sign": 1
+    },
+    {
+      "name": "diagonal_just_over",
+      "dx": 3.0,
+      "dy": 1.0,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "MOVE_RIGHT",
+      "reason": "OK",
+      "displacementRatio": 3.16227766,
+      "axisRatio": 3.0,
+      "axis": "x",
+      "sign": 1
+    },
+    {
+      "name": "too_small",
+      "dx": 0.6,
+      "dy": 0.0,
+      "scale": 1.0,
+      "frames": 20,
+      "label": "NONE",
+      "reason": "TOO_SMALL",
+      "displacementRatio": 0.6,
+      "axisRatio": "Infinity",
+      "axis": "x",
+      "sign": 1
+    },
+    {
+      "name": "far_hand",
+      "dx": 3.0,
+      "dy": 0.0,
+      "scale": 0.25,
+      "frames": 20,
+      "label": "MOVE_RIGHT",
+      "reason": "OK",
+      "displacementRatio": 3.0,
+      "axisRatio": "Infinity",
+      "axis": "x",
+      "sign": 1
+    }
+  ],
+  "mirroredMoveCases": [
+    {
+      "name": "right_raw",
+      "dx": 3.0,
+      "dy": 0.0,
+      "frames": 20,
+      "label": "MOVE_LEFT"
+    },
+    {
+      "name": "left_raw",
+      "dx": -3.0,
+      "dy": 0.0,
+      "frames": 20,
+      "label": "MOVE_RIGHT"
+    },
+    {
+      "name": "up_raw",
+      "dx": 0.0,
+      "dy": -3.0,
+      "frames": 20,
+      "label": "MOVE_UP"
+    },
+    {
+      "name": "down_raw",
+      "dx": 0.0,
+      "dy": 3.0,
+      "frames": 20,
+      "label": "MOVE_DOWN"
+    }
+  ],
+  "sequenceCases": [
+    {
+      "name": "full_pass",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5
+        },
+        {
+          "kind": "shape",
+          "label": "FIST",
+          "frames": 9
+        },
+        {
+          "kind": "move",
+          "dx": 1.0,
+          "dy": 0.0,
+          "frames": 14
+        }
+      ],
+      "state": "PASS",
+      "failReason": null,
+      "stepIndex": 3,
+      "stepsPassed": [
+        true,
+        true,
+        true
+      ]
+    },
+    {
+      "name": "wrong_shape_timeout",
+      "actions": [
+        "OPEN_PALM",
+        "INDEX",
+        "MOVE_RIGHT"
+      ],
+      "script": [
+        {
+          "kind": "shape",
+          "label": "FIST",
+          "frames": 70
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "WRONG_SHAPE",
+      "stepIndex": 0,
+      "stepsPassed": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "wrong_order",
+      "actions": [
+        "OPEN_PALM",
+        "MOVE_RIGHT",
+        "FIST"
+      ],
+      "script": [
+        {
+          "kind": "shape",
+          "label": "FIST",
+          "frames": 70
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "WRONG_ORDER",
+      "stepIndex": 0,
+      "stepsPassed": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "opposite_direction_fails_immediately",
+      "actions": [
+        "MOVE_RIGHT",
+        "OPEN_PALM",
+        "FIST"
+      ],
+      "script": [
+        {
+          "kind": "move",
+          "dx": -1.0,
+          "dy": 0.0,
+          "frames": 12
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "WRONG_DIRECTION",
+      "stepIndex": 0,
+      "stepsPassed": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "perpendicular_waits",
+      "actions": [
+        "MOVE_RIGHT",
+        "OPEN_PALM",
+        "FIST"
+      ],
+      "script": [
+        {
+          "kind": "move",
+          "dx": 0.0,
+          "dy": -1.0,
+          "frames": 12
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 0,
+      "stepsPassed": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "escape_gate_blocks_free_pass",
+      "actions": [
+        "MOVE_RIGHT",
+        "OPEN_PALM",
+        "FIST"
+      ],
+      "script": [
+        {
+          "kind": "move",
+          "dx": 1.0,
+          "dy": 0.0,
+          "frames": 14
+        },
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 15
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 1,
+      "stepsPassed": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "escape_then_pass",
+      "actions": [
+        "MOVE_RIGHT",
+        "OPEN_PALM",
+        "FIST"
+      ],
+      "script": [
+        {
+          "kind": "move",
+          "dx": 1.0,
+          "dy": 0.0,
+          "frames": 14
+        },
+        {
+          "kind": "shape",
+          "label": "FIST",
+          "frames": 4
+        },
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 2,
+      "stepsPassed": [
+        true,
+        true,
+        false
+      ]
+    },
+    {
+      "name": "hand_never_found",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "script": [
+        {
+          "kind": "lost",
+          "frames": 20
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "HAND_NOT_FOUND",
+      "stepIndex": 0,
+      "stepsPassed": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "hand_lost_mid_action",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 2
+        },
+        {
+          "kind": "lost",
+          "frames": 20
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "HAND_LOST",
+      "stepIndex": 0,
+      "stepsPassed": [
+        false,
+        false,
+        false
+      ]
+    }
+  ]
+}
