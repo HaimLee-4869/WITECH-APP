@@ -3,6 +3,7 @@ import 'dart:math';
 
 import '../core/config.dart';
 import '../models/api_error.dart';
+import '../models/app_user.dart';
 import '../models/auth_log.dart';
 import '../models/enroll.dart';
 import '../models/server_config.dart';
@@ -19,11 +20,12 @@ class MockApiClient implements ApiClient {
   /// 흉내 낼 네트워크 왕복 시간.
   static const Duration _latency = Duration(milliseconds: 1200);
 
-  /// 서버가 소유하는 판정 임계값. 실제 백엔드의 far1 운영점과 같은 값.
+  /// 서버가 소유하는 판정 임계값. 실제 백엔드의 default 운영점과 같은 값.
   ///
   /// **앱 코드 어디에서도 이 값을 읽어 판정하지 않는다.** 응답에 실어 보내기만 하고,
   /// 판정은 서버(여기서는 목)가 계산한 `passed`를 쓴다. (SPEC 6/9장)
-  static const double _serverThreshold = 0.6275163888931274;
+  static const double _userThreshold = 0.3423501253128052;    // Tu
+  static const double _gestureThreshold = 0.9020317792892456; // Tg
 
   /// 에러 UI를 확인할 수 있도록 이 확률로 타임아웃을 던진다. (SPEC 9장)
   static const double _timeoutRate = 0.05;
@@ -39,10 +41,37 @@ class MockApiClient implements ApiClient {
     return const ServerConfig(
       enrollmentTakes: kDefaultEnrollTakes,
       enrollmentGestures: 1,
-      captureDurationMs: 2000,
+      captureDurationMs: kRecordDurationMs,
       handRequired: 'right',
       modelVersion: 'mock-v0',
     );
+  }
+
+  @override
+  Future<List<AppUser>> fetchUsers() async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    return List<AppUser>.unmodifiable(_mockUsers);
+  }
+
+  @override
+  Future<AppUser> createUser({
+    required String id,
+    required String name,
+    String? department,
+  }) async {
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (_mockUsers.any((u) => u.id == id)) {
+      // 실제 서버와 같은 형태로 던져서 앱의 재시도 경로를 목에서도 검증한다.
+      throw const ApiException(
+        code: 'conflict',
+        reason: 'user_exists',
+        serverMessage: '이미 존재하는 사용자 ID입니다.',
+        statusCode: 409,
+      );
+    }
+    final user = AppUser(id: id, name: name, department: department);
+    _mockUsers.add(user);
+    return user;
   }
 
   @override
@@ -64,18 +93,23 @@ class MockApiClient implements ApiClient {
       );
     }
 
-    final score = 0.45 + _random.nextDouble() * 0.50;
+    // dual-head: 두 관문을 모두 넘어야 통과한다.
+    final userScore = 0.20 + _random.nextDouble() * 0.75;
+    final gestureScore = 0.80 + _random.nextDouble() * 0.20;
+    final userPassed = userScore >= _userThreshold;
+    final gesturePassed = gestureScore >= _gestureThreshold;
     return VerifyResponse(
-      score: score,
-      threshold: _serverThreshold,
-      passed: score >= _serverThreshold,
+      score: userScore,
+      threshold: _userThreshold,
+      gestureScore: gestureScore,
+      gestureThreshold: _gestureThreshold,
+      passed: userPassed && gesturePassed,
       latencyMs: _latency.inMilliseconds,
-      reason: score >= _serverThreshold ? null : 'below_threshold',
-      // 분류 결과는 기록용. 판정에는 쓰이지 않는다 (USE_GESTURE_CLASSIFIER=false).
-      predictedGesture: kGestureIds[_random.nextInt(kGestureIds.length)],
-      gestureConfidence: 0.7 + _random.nextDouble() * 0.25,
+      reason: gesturePassed
+          ? (userPassed ? null : 'below_threshold')
+          : 'gesture_gate',
       gestureId: req.gestureId,
-      modelVersion: 'mock-v0',
+      modelVersion: 'mock-dual-head',
     );
   }
 
@@ -122,6 +156,18 @@ class MockApiClient implements ApiClient {
     return _mockMonthly;
   }
 }
+
+/// 목 사용자. id는 백엔드 `scripts/seed_demo_data.py`의 팀 사용자와 같다.
+///
+/// `createUser()`가 여기에 추가하므로 const가 아니다. 목 클라이언트 인스턴스마다
+/// 공유되지만, 목 모드는 한 프로세스에 하나뿐이라 문제가 되지 않는다.
+final List<AppUser> _mockUsers = <AppUser>[
+  const AppUser(id: 'geonju', name: '김건주', department: '개발팀'),
+  const AppUser(id: 'taerin', name: '김태린', department: 'AI팀'),
+  const AppUser(id: 'seungyeon', name: '승연', department: 'AI팀'),
+  const AppUser(id: 'hyemin', name: '황혜민', department: '개발팀'),
+  const AppUser(id: 'eunjung', name: '이은정', department: '개발팀'),
+];
 
 /// 목업 표의 행. 스크롤이 되는지 확인하려고 12행 이상 넣었다. (SPEC 8.5)
 final List<AuthLog> _mockLogs = <AuthLog>[

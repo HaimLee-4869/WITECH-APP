@@ -106,6 +106,9 @@ class AuthFlowController extends Notifier<AuthFlowState> {
   String _userId = '';
   String _gestureId = kDefaultGestureId;
 
+  /// 한 번의 수집 길이. 서버 `GET /config`가 정한다.
+  Duration _recordDuration = kRecordDuration;
+
   /// 서버 왕복 중인지. 이 동안에는 세션 상태가 아니라 uploading/done을 보여준다.
   AuthPhase? _serverPhase;
 
@@ -115,11 +118,23 @@ class AuthFlowController extends Notifier<AuthFlowState> {
   @override
   AuthFlowState build() {
     _api = ref.watch(apiClientProvider);
-    _userId = ref.watch(selectedUserProvider);
+    // 요청에는 이름이 아니라 서버 users.id를 싣는다. 사용자 목록은 비동기로 오므로
+    // watch로 build를 다시 돌리지 않고(late final 필드 재할당) listen으로 값만 갱신한다.
+    ref.listen(
+      selectedUserProvider,
+      (_, user) => _userId = user?.id ?? '',
+      fireImmediately: true,
+    );
     _gestureId = ref.watch(selectedGestureProvider);
     _source = ref.watch(landmarkSourceProvider);
+    // 촬영 길이는 앱 상수가 아니라 서버 값이다. 등록과 인증이 같은 길이여야
+    // 유사도가 맞는다 (길이는 모델 입력 feature다).
+    _recordDuration = ref.watch(
+      serverConfigProvider.select((s) => s.config.captureDuration),
+    );
     _session = CaptureSession(
       source: _source,
+      recordDuration: _recordDuration,
       onChanged: _syncFromSession,
       onCaptured: _onCaptured,
       onAborted: (notice) {
@@ -197,6 +212,10 @@ class AuthFlowController extends Notifier<AuthFlowState> {
       _failToIdle('카메라 정보를 읽지 못했습니다. 화면을 나갔다가 다시 시도해주세요.');
       return;
     }
+    if (_userId.isEmpty) {
+      _failToIdle('사용자 목록을 불러오지 못했습니다. 홈에서 사용자를 선택해주세요.');
+      return;
+    }
 
     // 전송용 요청. 좌표에 미러링·정규화·특징추출을 일절 적용하지 않는다.
     // 화면의 오버레이는 좌우 반전되어 있지만 그건 렌더링 전용 변환이고,
@@ -207,7 +226,7 @@ class AuthFlowController extends Notifier<AuthFlowState> {
       camera: camera,
       capturedAt: DateTime.now(),
       nominalFps: kNominalFps,
-      durationMs: kRecordDuration.inMilliseconds,
+      durationMs: _recordDuration.inMilliseconds,
       frames: frames,
     );
 

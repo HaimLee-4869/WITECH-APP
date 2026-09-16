@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:signid/models/app_user.dart';
 import 'package:signid/core/config.dart';
 import 'package:signid/models/enroll.dart';
 import 'package:signid/models/server_config.dart';
@@ -15,6 +16,20 @@ class _RecordingApi implements ApiClient {
 
   @override
   Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
+
+  @override
+  Future<AppUser> createUser({
+    required String id,
+    required String name,
+    String? department,
+  }) async => AppUser(id: id, name: name, department: department);
+
+  @override
+  Future<List<AppUser>> fetchUsers() async => const [
+    AppUser(id: 'hong', name: '홍길동', department: '개발팀'),
+    AppUser(id: 'kim', name: '김길동', department: '인사팀'),
+    AppUser(id: 'oh', name: '오박사', department: '영업팀'),
+  ];
 
   @override
   Future<EnrollResponse> enroll(EnrollRequest req) async {
@@ -76,6 +91,8 @@ void main() {
       List<int>.generate(kDefaultEnrollTakes, (i) => i + 1),
     );
     expect(req.gestureId, kDefaultGestureId);
+    // 이름(홍길동)이 아니라 서버 users.id를 보낸다.
+    expect(req.userId, 'hong');
     expect(req.camera.width, greaterThan(0));
     expect(req.camera.height, greaterThan(0));
     for (final take in req.takes) {

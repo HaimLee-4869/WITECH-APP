@@ -117,11 +117,11 @@ class _ResultScreenState extends State<ResultScreen> {
   /// (SPEC 5장 카피 원칙)
   static String _detailFor(VerifyResponse res) {
     if (res.passed) return '출입이 허용되었습니다.';
+    // 두 관문 중 어디서 막혔는지에 따라 사용자가 할 일이 다르다.
+    // gesture_gate: 다른 동작을 했다 → 같은 동작을 하면 된다.
+    // below_threshold: 동작은 맞지만 본인으로 보이지 않는다 → 다시 시도.
     return switch (res.reason) {
-      null || 'below_threshold' =>
-        '등록된 수어 암호와 동작이 일치하지 않습니다. 같은 동작을 다시 수행해주세요.',
-      'no_template' => '이 수어 암호로 등록된 동작이 없습니다. 먼저 등록해주세요.',
-      'gesture_mismatch' => '등록한 수어 암호와 다른 동작으로 보입니다. 같은 동작을 다시 수행해주세요.',
+      null => '등록된 수어 암호와 동작이 일치하지 않습니다. 같은 동작을 다시 수행해주세요.',
       final r => messageForReason(r) ?? '인증이 거부되었습니다. ($r)',
     };
   }
@@ -138,27 +138,40 @@ class _ScoreChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 서버가 유사도 비교를 하지 않은 경우(score=null) 점수 칩을 아예 빼고,
+    // 서버가 비교를 하지 않은 경우(score=null) 점수 칩을 아예 빼고,
     // 0.0으로 표시해 '유사도가 0'처럼 보이게 하지 않는다. (backend/README 4.2)
+    //
+    // dual-head는 관문이 둘이라 점수도 둘이다. 개발·시연 중 어느 관문에서 막혔는지
+    // 화면에서 바로 보이게 둘 다 띄운다.
     final score = response.score;
     final threshold = response.threshold;
+    final gestureScore = response.gestureScore;
+    final gestureThreshold = response.gestureThreshold;
+    final gestureBlocked = response.blockedByGesture;
 
-    // 폭이 좁은 기기에서는 칩 3개가 한 줄에 들어가지 않으므로 Wrap을 쓴다.
+    // 폭이 좁은 기기에서는 칩이 한 줄에 들어가지 않으므로 Wrap을 쓴다.
     return Wrap(
       alignment: WrapAlignment.center,
       spacing: 8,
       runSpacing: 8,
       children: [
+        if (gestureScore != null)
+          StatusChip(
+            label: '동작 ${gestureScore.toStringAsFixed(3)}'
+                '${gestureThreshold != null ? ' / ${gestureThreshold.toStringAsFixed(2)}' : ''}',
+            color: gestureBlocked
+                ? AppColors.danger
+                : (response.passed ? AppColors.success : AppColors.textSecondary),
+            icon: Icons.back_hand_outlined,
+          ),
         if (score != null)
           StatusChip(
-            label: '유사도 ${score.toStringAsFixed(3)}',
-            color: response.passed ? AppColors.success : AppColors.danger,
-            icon: Icons.analytics_outlined,
-          ),
-        if (threshold != null)
-          StatusChip(
-            label: '기준 ${threshold.toStringAsFixed(2)}',
-            color: AppColors.textSecondary,
+            label: '본인 ${score.toStringAsFixed(3)}'
+                '${threshold != null ? ' / ${threshold.toStringAsFixed(2)}' : ''}',
+            color: response.passed
+                ? AppColors.success
+                : (gestureBlocked ? AppColors.textSecondary : AppColors.danger),
+            icon: Icons.person_outline,
           ),
         StatusChip(
           label: '${response.latencyMs}ms',

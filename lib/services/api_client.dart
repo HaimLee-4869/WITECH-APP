@@ -1,3 +1,4 @@
+import '../models/app_user.dart';
 import '../models/auth_log.dart';
 import '../models/enroll.dart';
 import '../models/server_config.dart';
@@ -13,6 +14,21 @@ import '../models/verify.dart';
 abstract class ApiClient {
   /// 앱 시작 시 호출해 등록 화면 구성값을 받아온다. (`GET /config`)
   Future<ServerConfig> fetchConfig();
+
+  /// 홈 화면 사용자 선택 목록. (`GET /users`)
+  ///
+  /// 요청에는 [AppUser.id]를, 화면에는 [AppUser.name]을 쓴다.
+  Future<List<AppUser>> fetchUsers();
+
+  /// 사용자를 만든다. (`POST /users`)
+  ///
+  /// 로그인이 없으므로 [id]는 앱이 만들어 넘긴다([newUserId]). 이미 있는 ID면
+  /// 서버가 409 `user_exists`를 주므로 호출자가 다시 만들어 재시도한다.
+  Future<AppUser> createUser({
+    required String id,
+    required String name,
+    String? department,
+  });
 
   /// 수집한 제스처로 본인 여부를 판정한다.
   Future<VerifyResponse> verify(VerifyRequest req);

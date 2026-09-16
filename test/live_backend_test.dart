@@ -91,9 +91,9 @@ void main() {
       ),
     );
     // ignore: avoid_print
-    print('verify: score=${res.score} passed=${res.passed} '
-        'predicted=${res.predictedGesture} threshold=${res.threshold} '
-        'model=${res.modelVersion} ${res.latencyMs}ms');
+    print('verify: user=${res.score}/${res.threshold} '
+        'gesture=${res.gestureScore}/${res.gestureThreshold} '
+        'passed=${res.passed} model=${res.modelVersion} ${res.latencyMs}ms');
     expect(res.passed, isTrue);
     expect(res.score, closeTo(1.0, 1e-4));
     expect(res.gestureId, gesture);

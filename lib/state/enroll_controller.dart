@@ -110,6 +110,9 @@ class EnrollController extends Notifier<EnrollState> {
   /// 서버가 요구하는 회차 수. `GET /config`에서 받는다.
   int _requiredTakes = kDefaultEnrollTakes;
 
+  /// 한 회차의 수집 길이. 인증과 같은 값이어야 한다.
+  Duration _recordDuration = kRecordDuration;
+
   /// 회차별 수집 결과. 원본 좌표 그대로 보관한다. (SPEC 원칙 A)
   final List<List<HandFrame>> _takes = <List<HandFrame>>[];
 
@@ -123,15 +126,25 @@ class EnrollController extends Notifier<EnrollState> {
   @override
   EnrollState build() {
     _api = ref.watch(apiClientProvider);
-    _userId = ref.watch(selectedUserProvider);
+    // 요청에는 이름이 아니라 서버 users.id를 싣는다. 사용자 목록은 비동기로 오므로
+    // watch로 build를 다시 돌리지 않고(late final 필드 재할당) listen으로 값만 갱신한다.
+    ref.listen(
+      selectedUserProvider,
+      (_, user) => _userId = user?.id ?? '',
+      fireImmediately: true,
+    );
     _gestureId = ref.watch(selectedGestureProvider);
     // 등록 회차 수는 서버가 정한다. 앱 상수는 응답 전 기본값일 뿐이다.
     _requiredTakes = ref.watch(
       serverConfigProvider.select((s) => s.config.enrollmentTakes),
     );
+    _recordDuration = ref.watch(
+      serverConfigProvider.select((s) => s.config.captureDuration),
+    );
     _source = ref.watch(landmarkSourceProvider);
     _session = CaptureSession(
       source: _source,
+      recordDuration: _recordDuration,
       onChanged: _sync,
       onCaptured: _onCaptured,
       onAborted: (notice) {
@@ -232,6 +245,10 @@ class EnrollController extends Notifier<EnrollState> {
       _fail('카메라 정보를 읽지 못했습니다. 화면을 나갔다가 다시 시도해주세요.');
       return;
     }
+    if (_userId.isEmpty) {
+      _fail('사용자 목록을 불러오지 못했습니다. 홈에서 사용자를 선택해주세요.');
+      return;
+    }
 
     final now = DateTime.now();
     final req = EnrollRequest(
@@ -246,7 +263,7 @@ class EnrollController extends Notifier<EnrollState> {
             takeNo: i + 1,
             capturedAt: now,
             nominalFps: kNominalFps,
-            durationMs: kRecordDuration.inMilliseconds,
+            durationMs: _recordDuration.inMilliseconds,
             frames: _takes[i],
           ),
       ],

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../core/config.dart';
 import '../models/api_error.dart';
+import '../models/app_user.dart';
 import '../models/auth_log.dart';
 import '../models/enroll.dart';
 import '../models/server_config.dart';
@@ -68,6 +69,28 @@ class HttpApiClient implements ApiClient {
   Future<ServerConfig> fetchConfig() async {
     final json = await _get('/config');
     return ServerConfig.fromJson(json as Map<String, dynamic>);
+  }
+
+  @override
+  Future<List<AppUser>> fetchUsers() async {
+    final json = await _get('/users');
+    return (json as List<dynamic>)
+        .map((e) => AppUser.fromJson(e as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  @override
+  Future<AppUser> createUser({
+    required String id,
+    required String name,
+    String? department,
+  }) async {
+    final json = await _post('/users', {
+      'id': id,
+      'name': name,
+      if (department != null && department.isNotEmpty) 'department': department,
+    });
+    return AppUser.fromJson(json as Map<String, dynamic>);
   }
 
   @override

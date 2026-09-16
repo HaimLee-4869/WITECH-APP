@@ -61,27 +61,32 @@ String iso8601WithOffset(DateTime dt) {
 
 /// 인증 응답. (backend/README 4.2)
 class VerifyResponse {
-  /// 0.0 ~ 1.0 유사도.
+  /// **user 관문** 유사도 (본인인지). 0.0 ~ 1.0.
   ///
-  /// **null일 수 있다.** `gesture_mismatch`, `no_template`처럼 서버가 유사도 비교를
-  /// 하지 않은 경우다. 0.0으로 채우면 "비교를 안 했다"와 "유사도가 0"이 구분되지 않아
-  /// 서버가 null을 준다. 화면은 null이면 점수를 표시하지 않는다.
+  /// **null일 수 있다.** `no_template`처럼 서버가 비교를 하지 않은 경우다. 0.0으로
+  /// 채우면 "비교를 안 했다"와 "유사도가 0"이 구분되지 않아 서버가 null을 준다.
   final double? score;
 
-  /// 판정 임계값. **서버가 소유한다.** 앱에 하드코딩하지 않는다.
+  /// user 관문 임계값 Tu. **서버가 소유한다.** 앱에 하드코딩하지 않는다.
   final double? threshold;
+
+  /// **gesture 관문** 유사도 (등록한 동작인지). dual-head(v1.1.1)부터 생겼다.
+  final double? gestureScore;
+
+  /// gesture 관문 임계값 Tg.
+  final double? gestureThreshold;
 
   final bool passed;
   final int latencyMs;
 
-  /// 실패 사유 코드 (예: `below_threshold`). 통과 시 null.
+  /// 실패 사유 코드. 통과 시 null.
+  ///
+  /// `gesture_gate`   등록한 동작이 아니다 (본인이어도 거부)
+  /// `below_threshold` 동작은 맞지만 본인이 아니다
+  /// `no_template`     이 수어 암호로 등록된 것이 없다
   final String? reason;
 
-  /// 제스처 분류 모델의 예측. 기록·분석용이며 판정에 쓰이지 않는다.
-  final String? predictedGesture;
-  final double? gestureConfidence;
-
-  /// 서버가 실제로 템플릿 조회에 쓴 제스처.
+  /// 서버가 템플릿 조회에 쓴 제스처.
   final String? gestureId;
 
   final String? modelVersion;
@@ -91,21 +96,24 @@ class VerifyResponse {
     required this.threshold,
     required this.passed,
     required this.latencyMs,
+    this.gestureScore,
+    this.gestureThreshold,
     this.reason,
-    this.predictedGesture,
-    this.gestureConfidence,
     this.gestureId,
     this.modelVersion,
   });
 
+  /// 두 관문 중 어디서 막혔는지. 통과했거나 비교를 안 했으면 null.
+  bool get blockedByGesture => reason == 'gesture_gate';
+
   factory VerifyResponse.fromJson(Map<String, dynamic> json) => VerifyResponse(
     score: (json['score'] as num?)?.toDouble(),
     threshold: (json['threshold'] as num?)?.toDouble(),
+    gestureScore: (json['gestureScore'] as num?)?.toDouble(),
+    gestureThreshold: (json['gestureThreshold'] as num?)?.toDouble(),
     passed: json['passed'] as bool? ?? false,
     latencyMs: (json['latencyMs'] as num?)?.toInt() ?? 0,
     reason: json['reason'] as String?,
-    predictedGesture: json['predictedGesture'] as String?,
-    gestureConfidence: (json['gestureConfidence'] as num?)?.toDouble(),
     gestureId: json['gestureId'] as String?,
     modelVersion: json['modelVersion'] as String?,
   );

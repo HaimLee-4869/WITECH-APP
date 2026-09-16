@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:signid/models/app_user.dart';
 import 'package:signid/core/config.dart';
 import 'package:signid/models/api_error.dart';
 import 'package:signid/models/camera_info.dart';
@@ -20,17 +21,31 @@ class _AlwaysPassApi implements ApiClient {
   Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
 
   @override
+  Future<AppUser> createUser({
+    required String id,
+    required String name,
+    String? department,
+  }) async => AppUser(id: id, name: name, department: department);
+
+  @override
+  Future<List<AppUser>> fetchUsers() async => const [
+    AppUser(id: 'hong', name: '홍길동', department: '개발팀'),
+    AppUser(id: 'kim', name: '김길동', department: '인사팀'),
+    AppUser(id: 'oh', name: '오박사', department: '영업팀'),
+  ];
+
+  @override
   Future<VerifyResponse> verify(VerifyRequest req) async {
     lastRequest = req;
     await Future<void>.delayed(const Duration(milliseconds: 50));
     return const VerifyResponse(
       score: 0.91,
-      threshold: 0.6275163888931274,
+      threshold: 0.3423501253128052,
       passed: true,
       latencyMs: 50,
       gestureId: 'G1',
-      predictedGesture: 'G2',
-      gestureConfidence: 0.81,
+      gestureScore: 0.97,
+      gestureThreshold: 0.9020317792892456,
     );
   }
 
@@ -69,7 +84,7 @@ void main() {
     controller.start();
     expect(container.read(authFlowProvider).phase, AuthPhase.handSearching);
 
-    // handSearching → handReady → 3초 카운트다운 → recording(2초) → uploading → done
+    // handSearching → handReady → 카운트다운 → recording → uploading → done
     final deadline = DateTime.now().add(const Duration(seconds: 20));
     while (container.read(authFlowProvider).phase != AuthPhase.done) {
       if (DateTime.now().isAfter(deadline)) {
@@ -93,7 +108,7 @@ void main() {
     expect(res, isNotNull);
     expect(res!.passed, isTrue);
     // threshold는 응답에서 온 값이어야 한다.
-    expect(res.threshold, 0.6275163888931274);
+    expect(res.threshold, 0.3423501253128052);
   }, timeout: const Timeout(Duration(seconds: 40)));
 
   test('전송 요청의 tMs가 실제 경과 시간이고 균등 간격이 아니다', () async {

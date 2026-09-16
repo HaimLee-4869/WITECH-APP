@@ -56,8 +56,8 @@ void main() {
           'threshold': 0.6275163888931274,
           'passed': true,
           'reason': null,
-          'predictedGesture': 'G2',
-          'gestureConfidence': 0.81,
+          'gestureScore': 0.97,
+          'gestureThreshold': 0.9020317792892456,
           'gestureId': 'G3',
           'modelVersion': 'handonly-supcon-v1.0.0',
           'latencyMs': 42,
@@ -94,7 +94,8 @@ void main() {
 
       expect(res.score, 0.71);
       expect(res.gestureId, 'G3');
-      expect(res.predictedGesture, 'G2');
+      expect(res.gestureScore, 0.97);
+      expect(res.gestureThreshold, 0.9020317792892456);
       expect(res.modelVersion, 'handonly-supcon-v1.0.0');
     });
 
@@ -198,8 +199,8 @@ void main() {
         'threshold': 0.6275163888931274,
         'passed': false,
         'reason': 'no_template',
-        'predictedGesture': 'G2',
-        'gestureConfidence': 0.9,
+        'gestureScore': null,
+        'gestureThreshold': 0.9020317792892456,
         'gestureId': 'G1',
         'modelVersion': 'handonly-supcon-v1.0.0',
         'latencyMs': 7,
@@ -281,6 +282,28 @@ void main() {
         statusCode: 422,
       );
       expect(unknown.userMessage, '서버가 준 설명');
+    });
+
+    test('/users는 id와 name을 분리해 받는다 (요청엔 id, 화면엔 name)', () async {
+      final fake = _FakeClient(
+        body: [
+          {
+            'id': 'hong',
+            'name': '홍길동',
+            'department': '개발팀',
+            'createdAt': '2026-09-16T01:00:00+00:00',
+            'enrolledGestures': ['G1', 'G5'],
+          },
+        ],
+      );
+      final api = HttpApiClient(baseUrl: 'http://server:8000', client: fake);
+      final users = await api.fetchUsers();
+
+      expect(fake.lastRequest!.url.path, '/users');
+      expect(users.single.id, 'hong');
+      expect(users.single.name, '홍길동');
+      expect(users.single.department, '개발팀');
+      expect(users.single.enrolledGestures, ['G1', 'G5']);
     });
 
     test('/config를 파싱해 등록 회차 수를 얻는다', () async {

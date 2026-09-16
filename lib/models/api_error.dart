@@ -107,6 +107,10 @@ const Map<String, String> _messages = <String, String>{
   'gesture_id_required': '수어 암호를 먼저 선택해주세요.',
   'take_count_mismatch': '등록 회차 수가 맞지 않습니다. 처음부터 다시 등록해주세요.',
   'unknown_gesture': '선택한 수어 암호를 서버가 모릅니다. 다른 암호를 선택해주세요.',
+  // --- 인증 거부 (200 응답의 reason) ---
+  'gesture_gate': '등록한 동작과 다릅니다. 등록할 때와 같은 수어 동작을 해주세요.',
+  'below_threshold': '등록된 동작과 일치하지 않습니다. 다시 시도해주세요.',
+  'no_template': '이 수어 암호로 등록된 동작이 없습니다. 먼저 등록해주세요.',
   // --- 조회 실패 ---
   'user_not_found': '등록되지 않은 사용자입니다. 관리자에게 문의해주세요.',
   'threshold_not_found': '서버 설정이 올바르지 않습니다. 관리자에게 문의해주세요.',

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:signid/models/app_user.dart';
+import 'package:signid/core/config.dart';
 import 'package:signid/core/theme.dart';
 import 'package:signid/models/auth_log.dart';
 import 'package:signid/models/enroll.dart';
@@ -23,6 +25,20 @@ import 'test_helpers.dart';
 class _StubApi implements ApiClient {
   @override
   Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
+
+  @override
+  Future<AppUser> createUser({
+    required String id,
+    required String name,
+    String? department,
+  }) async => AppUser(id: id, name: name, department: department);
+
+  @override
+  Future<List<AppUser>> fetchUsers() async => const [
+    AppUser(id: 'hong', name: '홍길동', department: '개발팀'),
+    AppUser(id: 'kim', name: '김길동', department: '인사팀'),
+    AppUser(id: 'oh', name: '오박사', department: '영업팀'),
+  ];
 
   final Future<VerifyResponse> Function(VerifyRequest) onVerify;
 
@@ -78,6 +94,7 @@ class _DeniedSource implements LandmarkSource {
 Future<ProviderContainer> _runToDone(
   _StubApi api, {
   Duration limit = const Duration(seconds: 25),
+  String? userId,
 }) async {
   final container = ProviderContainer(
     overrides: [
@@ -85,6 +102,9 @@ Future<ProviderContainer> _runToDone(
         fakeLandmarkSourceOverride,
       ],
   );
+  if (userId != null) {
+    container.read(selectedUserIdProvider.notifier).select(userId);
+  }
   final sub = container.listen(authFlowProvider, (_, _) {});
   addTearDown(sub.close);
   addTearDown(container.dispose);
@@ -160,6 +180,27 @@ void main() {
     }, timeout: const Timeout(Duration(seconds: 60)));
   });
 
+  group('요청의 userId는 이름이 아니라 서버 users.id다', () {
+    const ok = VerifyResponse(
+      score: 0.9,
+      threshold: 0.72,
+      passed: true,
+      latencyMs: 1,
+    );
+
+    test('고르지 않으면 목록 첫 사용자의 id를 보낸다', () async {
+      final api = _StubApi((_) async => ok);
+      await _runToDone(api);
+      expect(api.lastRequest!.userId, 'hong');
+    }, timeout: const Timeout(Duration(seconds: 60)));
+
+    test('고른 사용자의 id를 보낸다', () async {
+      final api = _StubApi((_) async => ok);
+      await _runToDone(api, userId: 'oh');
+      expect(api.lastRequest!.userId, 'oh');
+    }, timeout: const Timeout(Duration(seconds: 60)));
+  });
+
   group('목 API의 지연·실패·타임아웃이 각각 다르게 반영된다 (SPEC 11장)', () {
     test('타임아웃이면 idle로 돌아가고 네트워크 안내를 띄운다', () async {
       final api = _StubApi((_) async {
@@ -226,10 +267,10 @@ void main() {
 
   group('6개 상태가 모두 화면에 반영된다 (SPEC 11장)', () {
     test('상태마다 안내 문구가 다르다', () {
-      const cases = <AuthPhase, String>{
+      final cases = <AuthPhase, String>{
         AuthPhase.idle: '수어 암호를 입력하세요',
         AuthPhase.handSearching: '손을 원 안에 위치시켜 주세요',
-        AuthPhase.handReady: '3초 후 시작합니다',
+        AuthPhase.handReady: '$kCountdownSeconds초 후 시작합니다',
         AuthPhase.recording: '동작을 수행하세요',
         AuthPhase.uploading: '확인 중입니다',
         AuthPhase.done: '확인이 끝났습니다',

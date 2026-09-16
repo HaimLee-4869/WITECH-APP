@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
+import '../models/app_user.dart';
 import '../models/server_config.dart';
 import '../services/api_client.dart';
 import '../services/fake_landmark_source.dart';
@@ -27,24 +28,44 @@ final apiClientProvider = Provider<ApiClient>((ref) {
 /// 화면이 떠 있는 동안만 살아 있어야 하므로 autoDispose로 두고, 폐기될 때
 /// 네이티브 자원을 반드시 해제한다. (SPEC 8.2 — 화면 이탈 시 dispose)
 final landmarkSourceProvider = Provider.autoDispose<LandmarkSource>((ref) {
-  final LandmarkSource source =
-      kUseFakeLandmarks ? FakeLandmarkSource() : OnDeviceLandmarkSource();
+  final LandmarkSource source = kUseFakeLandmarks
+      ? FakeLandmarkSource()
+      : OnDeviceLandmarkSource();
   ref.onDispose(source.dispose);
   return source;
 });
 
-/// 홈 화면에서 선택한 사용자. 로그인을 구현하지 않으므로 이것이 신원이다.
-/// (SPEC 8.1)
-final selectedUserProvider = NotifierProvider<SelectedUser, String>(
-  SelectedUser.new,
+/// 서버 사용자 목록(`GET /users`). 실패하면 홈 화면이 에러와 재시도를 보여준다.
+final usersProvider = FutureProvider<List<AppUser>>((ref) {
+  return ref.watch(apiClientProvider).fetchUsers();
+});
+
+/// 홈 화면에서 고른 사용자의 **id**. null이면 아직 고르지 않았다.
+final selectedUserIdProvider = NotifierProvider<SelectedUserId, String?>(
+  SelectedUserId.new,
 );
 
-class SelectedUser extends Notifier<String> {
+class SelectedUserId extends Notifier<String?> {
   @override
-  String build() => kMockUsers.first;
+  String? build() => null;
 
-  void select(String user) => state = user;
+  void select(String id) => state = id;
 }
+
+/// 홈 화면에서 선택한 사용자. 로그인을 구현하지 않으므로 이것이 신원이다.
+/// (SPEC 8.1)
+///
+/// 고르지 않았으면 목록의 첫 사용자. 목록이 아직 없거나 비었으면 null이고,
+/// 그동안은 등록·인증을 시작할 수 없다. 요청에는 반드시 [AppUser.id]를 싣는다.
+final selectedUserProvider = Provider<AppUser?>((ref) {
+  final users = ref.watch(usersProvider).value;
+  if (users == null || users.isEmpty) return null;
+  final id = ref.watch(selectedUserIdProvider);
+  for (final u in users) {
+    if (u.id == id) return u;
+  }
+  return users.first;
+});
 
 /// 등록·인증에 쓸 수어 암호(제스처) ID.
 ///
