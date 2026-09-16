@@ -6,3 +6,6 @@ __pycache__/
 *.db-wal
 *.db-shm
 .env
+
+# 마이그레이션 전 DB 백업
+*.db.bak-*
