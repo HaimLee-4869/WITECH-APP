@@ -37,27 +37,33 @@ class HandFrame {
   /// 정확히 [kLandmarkCount]개.
   final List<Landmark> landmarks;
 
-  /// "Left" | "Right".
-  final String handedness;
+  /// "Left" | "Right". **모르면 null.**
+  ///
+  /// 서버는 이 값으로 왼손을 거른다(422 `wrong_hand`). 값을 모를 때 'Right'로
+  /// 채워 보내면 실제 왼손 입력을 오른손으로 위장하는 셈이라 인식률이 떨어진다.
+  /// AI 릴리스 README도 이를 명시적으로 금지한다. 모르면 보내지 않는다.
+  final String? handedness;
 
-  /// 검출 신뢰도.
-  final double score;
+  /// 검출 신뢰도. 소스가 주지 않으면 null.
+  final double? score;
 
   const HandFrame({
     required this.tMs,
     required this.landmarks,
-    required this.handedness,
-    required this.score,
+    this.handedness,
+    this.score,
   });
 
   /// 랜드마크가 21개 다 있는지. 오버레이 렌더링 전 방어용.
   bool get isComplete => landmarks.length == kLandmarkCount;
 
-  /// 전송 JSON의 frames 원소. (SPEC 6장)
+  /// 전송 JSON의 frames 원소. (backend/README 4.1)
+  ///
+  /// 좌표 키는 `lm`, 값은 `[x, y, z]` 배열. 모르는 값은 키 자체를 넣지 않는다.
   Map<String, dynamic> toJson() => <String, dynamic>{
     'tMs': tMs,
-    'handedness': handedness,
-    'score': score,
+    if (handedness != null) 'handedness': handedness,
+    if (score != null) 'score': score,
     'lm': landmarks.map((l) => l.toJson()).toList(),
   };
 }

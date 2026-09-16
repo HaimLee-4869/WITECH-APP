@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import '../models/camera_info.dart';
 import '../models/landmark.dart';
 
 /// 오버레이 좌표 변환에 필요한 파라미터 묶음.
@@ -70,6 +71,13 @@ abstract class LandmarkSource {
 
   /// 오버레이 좌표 변환 파라미터.
   LandmarkTransform get transform;
+
+  /// **검출에 넣은 이미지**의 해상도. 아직 모르면 null.
+  ///
+  /// 서버가 학습 때와 같은 종횡비 보정을 하려면 이 값이 필요하다. 없으면 422
+  /// `missing_camera_size`로 거절된다. 프리뷰 크기가 아니라 MediaPipe에 넘긴
+  /// 프레임의 크기여야 한다. (backend/README 4.1)
+  CameraInfo? get imageSize;
 
   /// 프레임 타임스탬프의 기준 시각을 0으로 리셋한다.
   ///

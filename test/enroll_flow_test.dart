@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:signid/core/config.dart';
 import 'package:signid/models/enroll.dart';
+import 'package:signid/models/server_config.dart';
 import 'package:signid/models/verify.dart';
 import 'package:signid/services/api_client.dart';
 import 'package:signid/state/enroll_controller.dart';
@@ -13,12 +14,18 @@ class _RecordingApi implements ApiClient {
   EnrollRequest? lastEnroll;
 
   @override
+  Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
+
+  @override
   Future<EnrollResponse> enroll(EnrollRequest req) async {
     lastEnroll = req;
     return EnrollResponse(
       enrolled: true,
-      acceptedTakes: req.takes.length,
-      templateId: 'tpl_test',
+      userId: req.userId,
+      gestureId: req.gestureId,
+      takeCount: req.takes.length,
+      required: req.takes.length,
+      modelVersion: 'test',
     );
   }
 
@@ -31,7 +38,7 @@ class _RecordingApi implements ApiClient {
 }
 
 void main() {
-  test('등록은 같은 제스처를 5회 모아 한 번에 전송한다', () async {
+  test('등록은 서버가 정한 회차만큼 모아 한 번에 전송한다', () async {
     final api = _RecordingApi();
     final container = ProviderContainer(
       overrides: [
@@ -62,19 +69,27 @@ void main() {
 
     final req = api.lastEnroll;
     expect(req, isNotNull);
-    expect(req!.takes.length, kEnrollRepeatCount);
+    expect(req!.takes.length, kDefaultEnrollTakes);
+    // takeNo는 1..N이 모두 있어야 서버가 받아들인다.
+    expect(
+      req.takes.map((t) => t.takeNo).toList(),
+      List<int>.generate(kDefaultEnrollTakes, (i) => i + 1),
+    );
+    expect(req.gestureId, kDefaultGestureId);
+    expect(req.camera.width, greaterThan(0));
+    expect(req.camera.height, greaterThan(0));
     for (final take in req.takes) {
-      expect(take.length, greaterThanOrEqualTo(kMinFramesForVerify));
+      expect(take.frames.length, greaterThanOrEqualTo(kMinFramesForVerify));
       // 회차마다 tMs가 0부터 다시 시작해야 한다.
-      expect(take.first.tMs, lessThan(200));
+      expect(take.frames.first.tMs, lessThan(200));
       expect(
-        take.last.tMs,
+        take.frames.last.tMs,
         lessThanOrEqualTo(kRecordDuration.inMilliseconds + 100),
       );
     }
 
     final state = container.read(enrollProvider);
-    expect(state.completedTakes, kEnrollRepeatCount);
+    expect(state.completedTakes, kDefaultEnrollTakes);
     expect(state.response?.enrolled, isTrue);
   }, timeout: const Timeout(Duration(seconds: 120)));
 }

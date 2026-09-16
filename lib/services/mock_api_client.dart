@@ -2,24 +2,28 @@ import 'dart:async';
 import 'dart:math';
 
 import '../core/config.dart';
+import '../models/api_error.dart';
 import '../models/auth_log.dart';
 import '../models/enroll.dart';
+import '../models/server_config.dart';
 import '../models/verify.dart';
 import 'api_client.dart';
 
 /// 서버 응답을 흉내 내는 목 구현. (SPEC 9장)
+///
+/// 실제 백엔드와 **같은 형태**로 응답한다. 실패도 200이 아니라 [ApiException]으로
+/// 던져서, 앱의 사유 코드 분기를 목 단계에서도 검증할 수 있게 한다.
 ///
 /// 즉시 반환하면 로딩 UI를 테스트할 수 없으므로 반드시 지연을 넣는다.
 class MockApiClient implements ApiClient {
   /// 흉내 낼 네트워크 왕복 시간.
   static const Duration _latency = Duration(milliseconds: 1200);
 
-  /// 서버가 소유하는 판정 임계값.
+  /// 서버가 소유하는 판정 임계값. 실제 백엔드의 far1 운영점과 같은 값.
   ///
-  /// **앱 코드 어디에서도 이 값을 읽어 판정하지 않는다.** 오직 응답에 실어
-  /// 보내기만 하고, 판정 결과는 서버(여기서는 목)가 계산한 `passed`를 쓴다.
-  /// 운영 중 조정 가능해야 하기 때문이다. (SPEC 6/9장)
-  static const double _serverThreshold = 0.72;
+  /// **앱 코드 어디에서도 이 값을 읽어 판정하지 않는다.** 응답에 실어 보내기만 하고,
+  /// 판정은 서버(여기서는 목)가 계산한 `passed`를 쓴다. (SPEC 6/9장)
+  static const double _serverThreshold = 0.6275163888931274;
 
   /// 에러 UI를 확인할 수 있도록 이 확률로 타임아웃을 던진다. (SPEC 9장)
   static const double _timeoutRate = 0.05;
@@ -30,6 +34,18 @@ class MockApiClient implements ApiClient {
   MockApiClient({int? seed}) : _random = Random(seed);
 
   @override
+  Future<ServerConfig> fetchConfig() async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    return const ServerConfig(
+      enrollmentTakes: kDefaultEnrollTakes,
+      enrollmentGestures: 1,
+      captureDurationMs: 2000,
+      handRequired: 'right',
+      modelVersion: 'mock-v0',
+    );
+  }
+
+  @override
   Future<VerifyResponse> verify(VerifyRequest req) async {
     await Future<void>.delayed(_latency);
 
@@ -37,24 +53,29 @@ class MockApiClient implements ApiClient {
       throw TimeoutException('서버 응답이 없습니다', _latency);
     }
 
-    // 프레임 수가 너무 적으면 실패. 컨트롤러에서도 걸러내지만, 서버가 최종
-    // 책임을 지는 구조라 여기서도 검사한다.
+    // 프레임 수가 너무 적으면 서버가 422로 거절한다. 컨트롤러에서도 걸러내지만,
+    // 서버가 최종 책임을 지는 구조라 여기서도 같은 형태로 던진다.
     if (req.frames.length < kMinFramesForVerify) {
-      return VerifyResponse(
-        score: 0.0,
-        threshold: _serverThreshold,
-        passed: false,
-        latencyMs: _latency.inMilliseconds,
-        reason: 'insufficient_frames',
+      throw const ApiException(
+        code: 'invalid_sequence',
+        reason: 'insufficient_valid_frames',
+        serverMessage: '손이 충분히 인식되지 않았습니다. 다시 시도해주세요.',
+        statusCode: 422,
       );
     }
 
-    final score = 0.55 + _random.nextDouble() * 0.40;
+    final score = 0.45 + _random.nextDouble() * 0.50;
     return VerifyResponse(
       score: score,
       threshold: _serverThreshold,
       passed: score >= _serverThreshold,
       latencyMs: _latency.inMilliseconds,
+      reason: score >= _serverThreshold ? null : 'below_threshold',
+      // 분류 결과는 기록용. 판정에는 쓰이지 않는다 (USE_GESTURE_CLASSIFIER=false).
+      predictedGesture: kGestureIds[_random.nextInt(kGestureIds.length)],
+      gestureConfidence: 0.7 + _random.nextDouble() * 0.25,
+      gestureId: req.gestureId,
+      modelVersion: 'mock-v0',
     );
   }
 
@@ -66,23 +87,26 @@ class MockApiClient implements ApiClient {
       throw TimeoutException('서버 응답이 없습니다', _latency);
     }
 
-    // 회차마다 최소 프레임 수를 만족해야 유효한 샘플로 친다.
-    final accepted = req.takes
-        .where((take) => take.length >= kMinFramesForVerify)
-        .length;
-
-    if (accepted < req.takes.length) {
-      return EnrollResponse(
-        enrolled: false,
-        acceptedTakes: accepted,
-        reason: 'insufficient_frames',
-      );
+    // 회차 하나라도 부실하면 전체 거절. 부분 등록은 없다. (backend/README 4.3)
+    for (final take in req.takes) {
+      if (take.frames.length < kMinFramesForVerify) {
+        throw ApiException(
+          code: 'invalid_sequence',
+          reason: 'too_few_frames',
+          serverMessage: '촬영된 프레임이 너무 적습니다. 다시 시도해주세요.',
+          takeNo: take.takeNo,
+          statusCode: 422,
+        );
+      }
     }
 
     return EnrollResponse(
       enrolled: true,
-      acceptedTakes: accepted,
-      templateId: 'tpl_${req.userId}_${req.capturedAt.millisecondsSinceEpoch}',
+      userId: req.userId,
+      gestureId: req.gestureId,
+      takeCount: req.takes.length,
+      required: req.takes.length,
+      modelVersion: 'mock-v0',
     );
   }
 
@@ -104,31 +128,38 @@ final List<AuthLog> _mockLogs = <AuthLog>[
   _log('홍길동', '개발팀', '2026-08-24 10:38:55', true),
   _log('김길동', '인사팀', '2026-08-24 10:38:55', true),
   _log('오박사', '개발팀', '2026-08-24 10:39:01', true),
-  _log('둘리', '영업팀', '2026-08-24 10:39:01', false),
+  _log('둘리', '영업팀', '2026-08-24 10:39:01', false, 'below_threshold'),
   _log('또치', '개발팀', '2026-08-24 10:39:01', true),
   _log('고길동', '개발팀', '2026-08-24 10:39:01', true),
   _log('홍길동', '개발팀', '2026-08-24 10:41:12', true),
-  _log('둘리', '영업팀', '2026-08-24 10:42:03', false),
+  _log('둘리', '영업팀', '2026-08-24 10:42:03', false, 'no_template'),
   _log('마이콜', '영업팀', '2026-08-24 10:43:27', true),
   _log('김길동', '인사팀', '2026-08-24 10:44:10', true),
-  _log('또치', '개발팀', '2026-08-24 10:45:38', false),
+  _log('또치', '개발팀', '2026-08-24 10:45:38', false, 'invalid_input'),
   _log('오박사', '개발팀', '2026-08-24 10:47:02', true),
   _log('고길동', '개발팀', '2026-08-24 10:48:19', true),
   _log('마이콜', '영업팀', '2026-08-24 10:51:44', true),
 ];
 
-AuthLog _log(String name, String dept, String ts, bool passed) => AuthLog(
+AuthLog _log(
+  String name,
+  String dept,
+  String ts,
+  bool passed, [
+  String? failReason,
+]) => AuthLog(
   userName: name,
   department: dept,
   timestamp: DateTime.parse(ts),
   passed: passed,
+  failReason: failReason,
 );
 
-/// 목업 차트의 1~5월 데이터. Y축 0~500 범위에 들어가도록 잡았다. (SPEC 8.5)
+/// 목업 차트 데이터. 서버 `GET /stats/monthly`와 같은 형태(YYYY-MM). (SPEC 8.5)
 const List<MonthlyStat> _mockMonthly = <MonthlyStat>[
-  MonthlyStat(month: 1, count: 120),
-  MonthlyStat(month: 2, count: 180),
-  MonthlyStat(month: 3, count: 240),
-  MonthlyStat(month: 4, count: 285),
-  MonthlyStat(month: 5, count: 330),
+  MonthlyStat(month: '2026-01', total: 120, passed: 104, failed: 16),
+  MonthlyStat(month: '2026-02', total: 180, passed: 158, failed: 22),
+  MonthlyStat(month: '2026-03', total: 240, passed: 211, failed: 29),
+  MonthlyStat(month: '2026-04', total: 285, passed: 255, failed: 30),
+  MonthlyStat(month: '2026-05', total: 330, passed: 299, failed: 31),
 ];

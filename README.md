@@ -92,24 +92,38 @@ flutter test      # 상태 머신 / 오버레이 / 화면 전환 테스트 22개
 
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
-| `kUseMockApi` | `true` | `true`면 `MockApiClient`(지연·랜덤 점수·5% 타임아웃), `false`면 `HttpApiClient`(아직 스텁) |
+| `kUseMockApi` | `true` | `true`면 `MockApiClient`(지연·랜덤 점수·5% 타임아웃), `false`면 `HttpApiClient`(실서버 연동 완료) |
 | `kUseFakeLandmarks` | `false` | `false`면 `OnDeviceLandmarkSource`(실제 카메라 + MediaPipe), `true`면 `FakeLandmarkSource`(사인파 가짜 손). 에뮬레이터에서 돌릴 때만 `true`로 바꾼다 |
-| `kEnrollRepeatCount` | `5` | 등록 시 같은 제스처를 반복 수집하는 횟수. AI팀이 정하면 바뀔 값 |
+| `kDefaultEnrollTakes` | `3` | 등록 회차 수의 **기본값**. 실제 값은 서버 `GET /config`의 `enrollmentTakes` |
 | `kRecordDuration` | `2000ms` | 한 번의 캡처에서 프레임을 모으는 시간 |
 | `kNominalFps` | `30` | 카메라 명목 fps. 서버로 보내는 `nominalFps` 값 |
 | `kMinFramesForVerify` | `20` | 이보다 적게 모이면 서버로 보내지 않고 재시도를 안내 |
 | `kHandReadyFrameThreshold` | `10` | 이만큼 연속 검출되면 카운트다운 시작 |
 | `kHandLostFrameThreshold` | `15` | 이만큼 연속으로 손이 사라지면 수집을 버리고 처음부터 |
-| `kAssumedHandedness` | `'Right'` | 전송 JSON의 `handedness` 고정값 (아래 "알려진 제약" 참고) |
+| `kGestureIds` | `G1`~`G5` | 서버가 아는 수어 암호 ID. 홈 화면에서 고른 값이 `gestureId`로 전송된다 |
+| `kPluginProvidesHandedness` | `false` | 플러그인이 좌/우를 주지 않아 `handedness`를 보내지 않는다 (아래 "알려진 제약") |
+| `kApiBaseUrl` | (빌드 시 주입) | `--dart-define=SIGNID_API_BASE=...` |
 
 홈 화면 하단에 현재 모드(목 API / 가짜 랜드마크)가 칩으로 표시된다.
 
-실제 서버로 붙일 때는 `HttpApiClient`의 각 메서드를 채우고, 서버 주소는
-코드에 넣지 말고 빌드 시 주입한다:
+실제 서버로 붙일 때는 `kUseMockApi`를 `false`로 바꾸고, 서버 주소는 코드에 넣지 말고
+빌드 시 주입한다. 실기기에서는 PC의 LAN IP를 쓴다(localhost는 폰 자신을 가리킨다):
 
 ```bash
-flutter run --dart-define=SIGNID_API_BASE=https://example.internal
+# 백엔드: cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
+flutter run --dart-define=SIGNID_API_BASE=http://192.168.0.10:8000
 ```
+
+연결만 따로 확인하려면:
+
+```bash
+flutter test test/live_backend_test.dart \
+  --dart-define=SIGNID_LIVE_TEST=1 \
+  --dart-define=SIGNID_API_BASE=http://127.0.0.1:8000
+```
+
+요청·응답 규격은 `backend/README.md` 4장, 실패 사유 코드는 5장에 있다.
+앱은 사유 코드별 안내 문구를 `lib/models/api_error.dart`에서 고른다.
 
 ---
 
@@ -267,12 +281,18 @@ done          결과 화면으로 전환
 `hand_landmarker` 3.0.1의 `Hand` 클래스는 `landmarks`만 노출하고
 **handedness(좌/우)와 검출 신뢰도(score)를 돌려주지 않는다.** 그래서:
 
-- `handedness` — `kAssumedHandedness`의 고정값(`'Right'`)을 보낸다. 좌표만으로
-  좌우를 추정하면 손바닥이 뒤집힐 때 틀리므로 추정하지 않았다.
+- `handedness` — **보내지 않는다.** 서버는 이 값으로 왼손을 거르지만(422 `wrong_hand`),
+  모르는 값을 `'Right'`로 채우면 실제 왼손 입력을 오른손으로 위장하게 되고
+  AI 릴리스 README가 이를 명시적으로 금지한다. 좌표만으로 좌우를 추정하는 것도
+  손바닥이 뒤집히면 틀린다.
 - `score` — 플러그인에 설정한 `minHandDetectionConfidence`(0.6)를 하한값으로
   기록한다. 플러그인이 그 미만은 걸러내므로 "이 값 이상"은 참이다.
 
-서버가 정확한 좌우/신뢰도를 필요로 한다면 플러그인 확장이나 서버 측 추정이 필요하다.
+**결과: 왼손으로 인증해도 서버가 걸러내지 못한다.** 현재 방어선은 인증·등록 화면의
+"오른손을 사용해주세요" 안내뿐이다(`HandGuideNotice`, 서버 `handRequired`에 연동).
+정확도가 떨어지는 조용한 실패로 이어지므로, 플러그인이 handedness를 주게 되면
+`OnDeviceLandmarkSource._toHandFrame()`에서 그 값을 실어 보내고
+`kPluginProvidesHandedness`를 `true`로 바꾼다. 그때부터 서버가 왼손을 거른다.
 
 ## 실기기 검증 기록
 

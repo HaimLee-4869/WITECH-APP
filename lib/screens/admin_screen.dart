@@ -270,8 +270,10 @@ class _MonthlyChartCard extends StatelessWidget {
   }
 
   LineChartData _chartData() {
+    // 서버 month는 'YYYY-MM' 문자열이라 X축에는 순번을 쓰고 라벨만 월로 보여준다.
     final spots = [
-      for (final s in stats) FlSpot(s.month.toDouble(), s.count.toDouble()),
+      for (var i = 0; i < stats.length; i++)
+        FlSpot(i.toDouble(), stats[i].total.toDouble()),
     ];
 
     return LineChartData(

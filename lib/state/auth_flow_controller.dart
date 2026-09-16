@@ -4,9 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
+import '../models/api_error.dart';
 import '../models/landmark.dart';
 import '../models/verify.dart';
 import '../services/api_client.dart';
+import '../services/landmark_source.dart';
 import 'capture_session.dart';
 import 'providers.dart';
 
@@ -99,8 +101,10 @@ class AuthFlowState {
 class AuthFlowController extends Notifier<AuthFlowState> {
   late final CaptureSession _session;
   late final ApiClient _api;
+  late final LandmarkSource _source;
 
   String _userId = '';
+  String _gestureId = kDefaultGestureId;
 
   /// 서버 왕복 중인지. 이 동안에는 세션 상태가 아니라 uploading/done을 보여준다.
   AuthPhase? _serverPhase;
@@ -112,8 +116,10 @@ class AuthFlowController extends Notifier<AuthFlowState> {
   AuthFlowState build() {
     _api = ref.watch(apiClientProvider);
     _userId = ref.watch(selectedUserProvider);
+    _gestureId = ref.watch(selectedGestureProvider);
+    _source = ref.watch(landmarkSourceProvider);
     _session = CaptureSession(
-      source: ref.watch(landmarkSourceProvider),
+      source: _source,
       onChanged: _syncFromSession,
       onCaptured: _onCaptured,
       onAborted: (notice) {
@@ -185,11 +191,20 @@ class AuthFlowController extends Notifier<AuthFlowState> {
     _serverPhase = AuthPhase.uploading;
     _syncFromSession();
 
+    // 서버가 학습 때와 같은 종횡비 보정을 하려면 검출에 넣은 이미지 크기가 필요하다.
+    final camera = _source.imageSize;
+    if (camera == null) {
+      _failToIdle('카메라 정보를 읽지 못했습니다. 화면을 나갔다가 다시 시도해주세요.');
+      return;
+    }
+
     // 전송용 요청. 좌표에 미러링·정규화·특징추출을 일절 적용하지 않는다.
     // 화면의 오버레이는 좌우 반전되어 있지만 그건 렌더링 전용 변환이고,
     // 여기 담기는 frames는 MediaPipe 원본 좌표 그대로다. (SPEC 원칙 A, 8.2)
     final req = VerifyRequest(
       userId: _userId,
+      gestureId: _gestureId,
+      camera: camera,
       capturedAt: DateTime.now(),
       nominalFps: kNominalFps,
       durationMs: kRecordDuration.inMilliseconds,
@@ -202,13 +217,16 @@ class AuthFlowController extends Notifier<AuthFlowState> {
       _response = res;
       _serverPhase = AuthPhase.done;
       _syncFromSession();
+    } on ApiException catch (e) {
+      if (!ref.mounted) return;
+      // 서버가 준 사유 코드로 재촬영 안내를 고른다. (backend/README 5장)
+      _failToIdle(e.userMessage);
     } on TimeoutException {
       if (!ref.mounted) return;
       _failToIdle('서버 응답이 없습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
-    } on UnimplementedError {
+    } on ApiNotConfiguredException catch (e) {
       if (!ref.mounted) return;
-      // kUseMockApi = false인데 서버 연동이 아직 안 된 경우.
-      _failToIdle('AI 서버가 아직 연결되지 않았습니다. config.dart의 kUseMockApi를 확인해주세요.');
+      _failToIdle(e.message);
     } catch (_) {
       if (!ref.mounted) return;
       _failToIdle('인증 요청을 보내지 못했습니다. 잠시 후 다시 시도해주세요.');

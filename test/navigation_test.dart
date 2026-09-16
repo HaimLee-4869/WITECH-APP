@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:signid/core/theme.dart';
 import 'package:signid/models/auth_log.dart';
 import 'package:signid/models/enroll.dart';
+import 'package:signid/models/server_config.dart';
 import 'package:signid/models/verify.dart';
 import 'package:signid/screens/admin_screen.dart';
 import 'package:signid/screens/auth_screen.dart';
@@ -18,6 +19,9 @@ import 'test_helpers.dart';
 /// 지연 없이 즉시 응답하는 API. 위젯 테스트에서 타이머를 기다리지 않기 위함.
 class _InstantApi implements ApiClient {
   @override
+  Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
+
+  @override
   Future<VerifyResponse> verify(_) async => const VerifyResponse(
     score: 0.9,
     threshold: 0.72,
@@ -27,7 +31,13 @@ class _InstantApi implements ApiClient {
 
   @override
   Future<EnrollResponse> enroll(_) async =>
-      const EnrollResponse(enrolled: true, acceptedTakes: 5);
+      const EnrollResponse(
+        enrolled: true,
+        userId: 'kim',
+        gestureId: 'G1',
+        takeCount: 3,
+        required: 3,
+      );
 
   @override
   Future<List<AuthLog>> fetchAuthLogs() async => [
@@ -47,11 +57,11 @@ class _InstantApi implements ApiClient {
 
   @override
   Future<List<MonthlyStat>> fetchMonthlyStats() async => const [
-    MonthlyStat(month: 1, count: 120),
-    MonthlyStat(month: 2, count: 180),
-    MonthlyStat(month: 3, count: 240),
-    MonthlyStat(month: 4, count: 285),
-    MonthlyStat(month: 5, count: 330),
+    MonthlyStat(month: '2026-01', total: 120, passed: 104, failed: 16),
+    MonthlyStat(month: '2026-02', total: 180, passed: 158, failed: 22),
+    MonthlyStat(month: '2026-03', total: 240, passed: 211, failed: 29),
+    MonthlyStat(month: '2026-04', total: 285, passed: 255, failed: 30),
+    MonthlyStat(month: '2026-05', total: 330, passed: 299, failed: 31),
   ];
 }
 
@@ -104,7 +114,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(EnrollScreen), findsOneWidget);
-    expect(find.text('0 / 5 회차 완료'), findsOneWidget);
+    expect(find.textContaining('0 / 3 회차 완료'), findsOneWidget);
   });
 
   testWidgets('홈에서 관리자 화면으로 이동하고 표와 차트가 렌더링된다', (tester) async {
@@ -180,7 +190,7 @@ void main() {
     await tester.pumpWidget(_app());
     expect(find.text('홍길동'), findsOneWidget);
 
-    await tester.tap(find.byType(DropdownButton<String>));
+    await tester.tap(find.byType(DropdownButton<String>).first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('오박사').last);
     await tester.pumpAndSettle();

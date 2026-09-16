@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/config.dart';
 import '../core/theme.dart';
 import '../state/enroll_controller.dart';
 import '../state/providers.dart';
 import '../widgets/capture_ring.dart';
+import '../widgets/hand_guide_notice.dart';
 import '../widgets/hand_overlay_painter.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/secondary_button.dart';
@@ -57,7 +57,9 @@ class _EnrollScreenState extends ConsumerState<EnrollScreen> {
                     Center(child: _CaptureArea(diameter: diameter)),
                     const Spacer(flex: 2),
                     const _MessageText(),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 8),
+                    const HandGuideNotice(),
+                    const SizedBox(height: 16),
                     const _ActionButtons(),
                     const SizedBox(height: 24),
                   ],
@@ -75,12 +77,15 @@ class _TakeIndicator extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final done = ref.watch(enrollProvider.select((s) => s.completedTakes));
+    // 회차 수는 서버 GET /config가 정한다. (backend/README 4.4)
+    final total = ref.watch(enrollProvider.select((s) => s.requiredTakes));
+    final gesture = ref.watch(enrollProvider.select((s) => s.gestureId));
 
     return Column(
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(kEnrollRepeatCount, (i) {
+          children: List.generate(total, (i) {
             final filled = i < done;
             return Container(
               width: 10,
@@ -94,7 +99,7 @@ class _TakeIndicator extends ConsumerWidget {
           }),
         ),
         const SizedBox(height: 8),
-        Text('$done / $kEnrollRepeatCount 회차 완료', style: AppText.caption),
+        Text('수어 암호 $gesture · $done / $total 회차 완료', style: AppText.caption),
       ],
     );
   }
@@ -261,7 +266,8 @@ class _EnrollDone extends ConsumerWidget {
         ),
         const SizedBox(height: 12),
         Text(
-          '${res?.acceptedTakes ?? 0}회차가 등록되었습니다. 이제 인증에 사용할 수 있습니다.',
+          '수어 암호 ${res?.gestureId ?? ''}를 ${res?.takeCount ?? 0}회차 등록했습니다. '
+          '이제 인증에 사용할 수 있습니다.',
           textAlign: TextAlign.center,
           style: AppText.caption,
         ),

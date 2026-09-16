@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../core/theme.dart';
+import '../models/api_error.dart';
 import '../models/verify.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/secondary_button.dart';
@@ -117,10 +118,11 @@ class _ResultScreenState extends State<ResultScreen> {
   static String _detailFor(VerifyResponse res) {
     if (res.passed) return '출입이 허용되었습니다.';
     return switch (res.reason) {
-      'insufficient_frames' =>
-        '동작이 충분히 기록되지 않았습니다. 손 전체가 원 안에 보이도록 하고 다시 시도해주세요.',
-      null => '등록된 수어 암호와 동작이 일치하지 않습니다. 같은 동작을 다시 수행해주세요.',
-      final r => '인증이 거부되었습니다. ($r)',
+      null || 'below_threshold' =>
+        '등록된 수어 암호와 동작이 일치하지 않습니다. 같은 동작을 다시 수행해주세요.',
+      'no_template' => '이 수어 암호로 등록된 동작이 없습니다. 먼저 등록해주세요.',
+      'gesture_mismatch' => '등록한 수어 암호와 다른 동작으로 보입니다. 같은 동작을 다시 수행해주세요.',
+      final r => messageForReason(r) ?? '인증이 거부되었습니다. ($r)',
     };
   }
 }
@@ -136,21 +138,28 @@ class _ScoreChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 서버가 유사도 비교를 하지 않은 경우(score=null) 점수 칩을 아예 빼고,
+    // 0.0으로 표시해 '유사도가 0'처럼 보이게 하지 않는다. (backend/README 4.2)
+    final score = response.score;
+    final threshold = response.threshold;
+
     // 폭이 좁은 기기에서는 칩 3개가 한 줄에 들어가지 않으므로 Wrap을 쓴다.
     return Wrap(
       alignment: WrapAlignment.center,
       spacing: 8,
       runSpacing: 8,
       children: [
-        StatusChip(
-          label: '유사도 ${response.score.toStringAsFixed(3)}',
-          color: response.passed ? AppColors.success : AppColors.danger,
-          icon: Icons.analytics_outlined,
-        ),
-        StatusChip(
-          label: '기준 ${response.threshold.toStringAsFixed(2)}',
-          color: AppColors.textSecondary,
-        ),
+        if (score != null)
+          StatusChip(
+            label: '유사도 ${score.toStringAsFixed(3)}',
+            color: response.passed ? AppColors.success : AppColors.danger,
+            icon: Icons.analytics_outlined,
+          ),
+        if (threshold != null)
+          StatusChip(
+            label: '기준 ${threshold.toStringAsFixed(2)}',
+            color: AppColors.textSecondary,
+          ),
         StatusChip(
           label: '${response.latencyMs}ms',
           color: AppColors.textSecondary,

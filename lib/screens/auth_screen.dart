@@ -5,6 +5,7 @@ import '../core/theme.dart';
 import '../state/auth_flow_controller.dart';
 import '../state/providers.dart';
 import '../widgets/capture_ring.dart';
+import '../widgets/hand_guide_notice.dart';
 import '../widgets/hand_overlay_painter.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/secondary_button.dart';
@@ -65,7 +66,9 @@ class _AuthScreenState extends ConsumerState<AuthScreen> {
               Center(child: _CaptureArea(diameter: diameter)),
               const Spacer(flex: 2),
               const _MessageText(),
-              const SizedBox(height: 28),
+              const SizedBox(height: 8),
+              const HandGuideNotice(),
+              const SizedBox(height: 20),
               const _ActionButtons(),
               const SizedBox(height: 24),
             ],

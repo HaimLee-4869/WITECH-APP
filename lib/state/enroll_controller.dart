@@ -4,9 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/config.dart';
+import '../models/api_error.dart';
 import '../models/enroll.dart';
 import '../models/landmark.dart';
 import '../services/api_client.dart';
+import '../services/landmark_source.dart';
 import 'capture_session.dart';
 import 'providers.dart';
 
@@ -37,8 +39,14 @@ class EnrollState {
   final int countdown;
   final double progress;
 
-  /// 지금까지 성공적으로 수집한 회차 수. 진행 인디케이터(점 5개)에 쓴다.
+  /// 지금까지 성공적으로 수집한 회차 수. 진행 인디케이터(점)에 쓴다.
   final int completedTakes;
+
+  /// 서버가 요구하는 회차 수(`GET /config`의 enrollmentTakes).
+  final int requiredTakes;
+
+  /// 등록할 수어 암호.
+  final String gestureId;
 
   /// 서버 응답. [EnrollPhase.done]에서만 채워진다.
   final EnrollResponse? response;
@@ -52,13 +60,14 @@ class EnrollState {
     this.countdown = kCountdownSeconds,
     this.progress = 0.0,
     this.completedTakes = 0,
+    this.requiredTakes = kDefaultEnrollTakes,
+    this.gestureId = kDefaultGestureId,
     this.response,
     this.notice,
   });
 
   /// 지금 진행 중인 회차 번호(1-based). 전부 끝났으면 마지막 번호를 유지한다.
-  int get currentTake =>
-      (completedTakes + 1).clamp(1, kEnrollRepeatCount);
+  int get currentTake => (completedTakes + 1).clamp(1, requiredTakes);
 
   /// 안내 문구.
   String get message {
@@ -67,10 +76,10 @@ class EnrollState {
     return switch (phase) {
       EnrollPhase.idle => completedTakes == 0
           ? '등록할 수어 암호를 준비하고 시작을 누르세요'
-          : '$currentTake/$kEnrollRepeatCount 회차를 시작하려면 계속을 누르세요',
+          : '$currentTake/$requiredTakes 회차를 시작하려면 계속을 누르세요',
       EnrollPhase.handSearching => '손을 원 안에 위치시켜 주세요',
       EnrollPhase.handReady => '$countdown초 후 시작합니다',
-      EnrollPhase.recording => '동작을 수행하세요 ($currentTake/$kEnrollRepeatCount)',
+      EnrollPhase.recording => '동작을 수행하세요 ($currentTake/$requiredTakes)',
       EnrollPhase.betweenTakes => '다시 한 번 같은 동작을 해주세요',
       EnrollPhase.uploading => '등록하는 중입니다',
       EnrollPhase.done => '등록이 완료되었습니다',
@@ -93,8 +102,13 @@ class EnrollState {
 class EnrollController extends Notifier<EnrollState> {
   late final CaptureSession _session;
   late final ApiClient _api;
+  late final LandmarkSource _source;
 
   String _userId = '';
+  String _gestureId = kDefaultGestureId;
+
+  /// 서버가 요구하는 회차 수. `GET /config`에서 받는다.
+  int _requiredTakes = kDefaultEnrollTakes;
 
   /// 회차별 수집 결과. 원본 좌표 그대로 보관한다. (SPEC 원칙 A)
   final List<List<HandFrame>> _takes = <List<HandFrame>>[];
@@ -110,8 +124,14 @@ class EnrollController extends Notifier<EnrollState> {
   EnrollState build() {
     _api = ref.watch(apiClientProvider);
     _userId = ref.watch(selectedUserProvider);
+    _gestureId = ref.watch(selectedGestureProvider);
+    // 등록 회차 수는 서버가 정한다. 앱 상수는 응답 전 기본값일 뿐이다.
+    _requiredTakes = ref.watch(
+      serverConfigProvider.select((s) => s.config.enrollmentTakes),
+    );
+    _source = ref.watch(landmarkSourceProvider);
     _session = CaptureSession(
-      source: ref.watch(landmarkSourceProvider),
+      source: _source,
       onChanged: _sync,
       onCaptured: _onCaptured,
       onAborted: (notice) {
@@ -123,7 +143,7 @@ class EnrollController extends Notifier<EnrollState> {
       _intervalTimer?.cancel();
       _session.dispose();
     });
-    return const EnrollState();
+    return EnrollState(requiredTakes: _requiredTakes, gestureId: _gestureId);
   }
 
   Future<void> attach() => _session.attach();
@@ -134,7 +154,7 @@ class EnrollController extends Notifier<EnrollState> {
     _notice = null;
     _overridePhase = null;
     // 회차는 다 모았는데 전송만 실패한 경우. 다시 찍게 하지 않고 전송만 재시도한다.
-    if (_takes.length >= kEnrollRepeatCount) {
+    if (_takes.length >= _requiredTakes) {
       _upload();
       return;
     }
@@ -158,6 +178,8 @@ class EnrollController extends Notifier<EnrollState> {
       countdown: _session.countdown,
       progress: _session.progress,
       completedTakes: _takes.length,
+      requiredTakes: _requiredTakes,
+      gestureId: _gestureId,
       response: _response,
       notice: _notice,
     );
@@ -183,7 +205,7 @@ class EnrollController extends Notifier<EnrollState> {
     _takes.add(frames);
     _notice = null;
 
-    if (_takes.length >= kEnrollRepeatCount) {
+    if (_takes.length >= _requiredTakes) {
       _upload();
       return;
     }
@@ -205,31 +227,53 @@ class EnrollController extends Notifier<EnrollState> {
     _notice = null;
     _sync();
 
+    final camera = _source.imageSize;
+    if (camera == null) {
+      _fail('카메라 정보를 읽지 못했습니다. 화면을 나갔다가 다시 시도해주세요.');
+      return;
+    }
+
+    final now = DateTime.now();
     final req = EnrollRequest(
       userId: _userId,
-      capturedAt: DateTime.now(),
-      nominalFps: kNominalFps,
+      gestureId: _gestureId,
+      camera: camera,
       // 원본 좌표 그대로. 전처리는 서버 책임이다. (SPEC 원칙 A)
-      takes: List<List<HandFrame>>.unmodifiable(_takes),
+      // takeNo는 1..N이 모두 있어야 서버가 받아들인다. (backend/README 4.3)
+      takes: <EnrollTake>[
+        for (var i = 0; i < _takes.length; i++)
+          EnrollTake(
+            takeNo: i + 1,
+            capturedAt: now,
+            nominalFps: kNominalFps,
+            durationMs: kRecordDuration.inMilliseconds,
+            frames: _takes[i],
+          ),
+      ],
     );
 
     try {
       final res = await _api.enroll(req);
       if (!ref.mounted) return;
       _response = res;
-      if (res.enrolled) {
-        _overridePhase = EnrollPhase.done;
-        _sync();
-      } else {
+      _overridePhase = EnrollPhase.done;
+      _sync();
+    } on ApiException catch (e) {
+      if (!ref.mounted) return;
+      // 서버는 회차 하나만 불량해도 전체를 거절하고 아무것도 저장하지 않는다.
+      // 어느 회차가 문제인지는 e.takeNo에 담겨 온다. (backend/README 4.3)
+      if (e.isRetryableCapture) {
         _takes.clear();
-        _fail('등록에 실패했습니다. (${res.reason ?? 'unknown'}) 처음부터 다시 시도해주세요.');
+        _fail('${e.userMessage} 처음부터 다시 등록해주세요.');
+      } else {
+        _fail(e.userMessage);
       }
     } on TimeoutException {
       if (!ref.mounted) return;
       _fail('서버 응답이 없습니다. 네트워크 상태를 확인하고 다시 시도해주세요.');
-    } on UnimplementedError {
+    } on ApiNotConfiguredException catch (e) {
       if (!ref.mounted) return;
-      _fail('AI 서버가 아직 연결되지 않았습니다. config.dart의 kUseMockApi를 확인해주세요.');
+      _fail(e.message);
     } catch (_) {
       if (!ref.mounted) return;
       _fail('등록 요청을 보내지 못했습니다. 잠시 후 다시 시도해주세요.');

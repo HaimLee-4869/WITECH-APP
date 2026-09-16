@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/widgets.dart';
 
+import '../models/camera_info.dart';
 import '../models/landmark.dart';
 import 'landmark_source.dart';
 
@@ -30,6 +31,10 @@ class FakeLandmarkSource implements LandmarkSource {
 
   @override
   Stream<HandFrame> get frames => _controller.stream;
+
+  /// 가짜 좌표는 세로 화면 기준으로 만들었다. 실기기 프리뷰와 같은 비율로 둔다.
+  @override
+  CameraInfo? get imageSize => const CameraInfo(width: 720, height: 1280);
 
   /// Fake 소스는 보여줄 카메라 프리뷰가 없다. 원 안에는 오버레이만 그린다.
   @override
@@ -83,7 +88,7 @@ class FakeLandmarkSource implements LandmarkSource {
       HandFrame(
         tMs: tMs,
         landmarks: _poseAt(tMs / 1000.0),
-        handedness: 'Right',
+        // 실기기 소스와 같게 handedness를 보내지 않는다 (플러그인이 주지 않는다).
         score: 0.92 + _random.nextDouble() * 0.06,
       ),
     );

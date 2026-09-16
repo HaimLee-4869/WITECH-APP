@@ -1,58 +1,95 @@
+import 'camera_info.dart';
 import 'landmark.dart';
+import 'verify.dart' show iso8601WithOffset;
 
-/// 제스처 등록 요청. 같은 동작을 여러 회차 반복 수집한 결과를 한 번에 보낸다.
-class EnrollRequest {
-  final String userId;
+/// 등록 회차 하나. (backend/README 4.3 `takes[]`)
+class EnrollTake {
+  /// 1부터 시작하는 회차 번호. 서버는 1..N이 모두 있어야 받아들인다.
+  final int takeNo;
   final DateTime capturedAt;
   final double nominalFps;
+  final int durationMs;
+  final List<HandFrame> frames;
 
-  /// 회차별 프레임 목록. 길이 = 실제 수집된 회차 수.
-  final List<List<HandFrame>> takes;
-
-  const EnrollRequest({
-    required this.userId,
+  const EnrollTake({
+    required this.takeNo,
     required this.capturedAt,
     required this.nominalFps,
-    required this.takes,
+    required this.durationMs,
+    required this.frames,
   });
 
-  /// SPEC에 등록용 JSON 스키마가 명시되지 않아, 6장의 인증 스키마를 회차 배열로
-  /// 확장한 형태로 정했다. 서버 팀과 확정되면 이 부분만 고치면 된다.
   Map<String, dynamic> toJson() => <String, dynamic>{
-    'userId': userId,
-    'capturedAt': capturedAt.toIso8601String(),
+    'takeNo': takeNo,
+    'capturedAt': iso8601WithOffset(capturedAt),
     'nominalFps': nominalFps,
-    'takeCount': takes.length,
-    'takes': takes
-        .map((take) => take.map((f) => f.toJson()).toList())
-        .toList(),
+    'durationMs': durationMs,
+    'frames': frames.map((f) => f.toJson()).toList(),
   };
 }
 
-/// 등록 응답.
+/// 제스처 등록 요청. 같은 동작을 여러 회차 반복 수집한 결과를 한 번에 보낸다.
+///
+/// 회차가 하나라도 불량이면 서버가 **전체를 422로 거절하고 아무것도 저장하지 않는다.**
+/// 같은 `(userId, gestureId)`로 다시 보내면 기존 등록을 대체한다.
+class EnrollRequest {
+  final String userId;
+
+  /// 등록할 수어 암호.
+  final String gestureId;
+
+  /// MediaPipe에 넣은 이미지 해상도. take 공통이라 최상위에 한 번 보낸다.
+  final CameraInfo camera;
+
+  final List<EnrollTake> takes;
+
+  const EnrollRequest({
+    required this.userId,
+    required this.gestureId,
+    required this.camera,
+    required this.takes,
+  });
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+    'userId': userId,
+    'gestureId': gestureId,
+    'camera': camera.toJson(),
+    'takes': takes.map((t) => t.toJson()).toList(),
+  };
+}
+
+/// 등록 응답. (backend/README 4.3)
+///
+/// 실패는 200 + `enrolled: false`가 아니라 **422 에러 응답**으로 온다.
+/// 그래서 이 객체는 성공 경로에서만 만들어진다.
 class EnrollResponse {
   final bool enrolled;
+  final String userId;
+  final String gestureId;
 
-  /// 서버가 실제로 받아들인 회차 수.
-  final int acceptedTakes;
+  /// 서버가 저장한 회차 수.
+  final int takeCount;
 
-  /// 등록된 템플릿 식별자. 실패 시 null.
-  final String? templateId;
+  /// 서버가 요구하는 회차 수.
+  final int required;
 
-  /// 실패 사유. 성공 시 null.
-  final String? reason;
+  final String? modelVersion;
 
   const EnrollResponse({
     required this.enrolled,
-    required this.acceptedTakes,
-    this.templateId,
-    this.reason,
+    required this.userId,
+    required this.gestureId,
+    required this.takeCount,
+    required this.required,
+    this.modelVersion,
   });
 
   factory EnrollResponse.fromJson(Map<String, dynamic> json) => EnrollResponse(
-    enrolled: json['enrolled'] as bool,
-    acceptedTakes: (json['acceptedTakes'] as num).toInt(),
-    templateId: json['templateId'] as String?,
-    reason: json['reason'] as String?,
+    enrolled: json['enrolled'] as bool? ?? false,
+    userId: json['userId'] as String? ?? '',
+    gestureId: json['gestureId'] as String? ?? '',
+    takeCount: (json['takeCount'] as num?)?.toInt() ?? 0,
+    required: (json['required'] as num?)?.toInt() ?? 0,
+    modelVersion: json['modelVersion'] as String?,
   );
 }

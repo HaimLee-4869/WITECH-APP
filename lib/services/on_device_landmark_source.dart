@@ -5,8 +5,8 @@ import 'package:flutter/widgets.dart';
 import 'package:hand_landmarker/hand_landmarker.dart' as mp;
 import 'package:permission_handler/permission_handler.dart';
 
-import '../core/config.dart';
 import '../core/hand_connections.dart';
+import '../models/camera_info.dart';
 import '../models/landmark.dart';
 import 'landmark_source.dart';
 
@@ -30,12 +30,18 @@ class OnDeviceLandmarkSource implements LandmarkSource {
   mp.HandLandmarkerPlugin? _plugin;
   StreamSubscription<List<mp.Hand>>? _sub;
 
+  /// 마지막으로 MediaPipe에 넘긴 프레임의 해상도.
+  CameraInfo? _imageSize;
+
   bool _starting = false;
   bool _running = false;
   bool _disposed = false;
 
   @override
   Stream<HandFrame> get frames => _controller.stream;
+
+  @override
+  CameraInfo? get imageSize => _imageSize;
 
   @override
   Future<void> start() async {
@@ -207,6 +213,8 @@ class OnDeviceLandmarkSource implements LandmarkSource {
     final plugin = _plugin;
     final camera = _camera;
     if (plugin == null || camera == null) return;
+    // 서버로 보낼 camera.width/height. 프리뷰가 아니라 검출에 넣는 이 프레임이 기준이다.
+    _imageSize ??= CameraInfo(width: image.width, height: image.height);
     // fire-and-forget. 결과는 landmarkStream으로 따로 돌아온다.
     plugin.processFrame(image, camera.description.sensorOrientation);
   }
@@ -232,10 +240,13 @@ class OnDeviceLandmarkSource implements LandmarkSource {
       landmarks: [
         for (final lm in hand.landmarks) Landmark(lm.x, lm.y, lm.z),
       ],
-      handedness: kAssumedHandedness,
-      // hand_landmarker 3.0.1의 Hand는 신뢰도를 돌려주지 않는다. 다만 플러그인이
-      // minHandDetectionConfidence 미만은 걸러내므로, 그 임계값을 "이 값 이상"
-      // 이라는 하한으로 기록한다. 정확한 값이 필요하면 플러그인 확장이 필요하다.
+      // hand_landmarker 3.0.1의 Hand는 좌/우를 주지 않는다. 모르는 값을 'Right'로
+      // 채워 보내면 실제 왼손을 오른손으로 위장하게 되므로(AI 릴리스 README 금지)
+      // 아예 보내지 않는다. 대신 화면에서 오른손 사용을 안내한다.
+      // 플러그인이 handedness를 주게 되면 여기서 그대로 실으면 된다.
+      handedness: null,
+      // 이 플러그인은 신뢰도도 돌려주지 않는다. 다만 minHandDetectionConfidence
+      // 미만은 걸러내므로 그 임계값을 하한으로 기록한다.
       score: _minDetectionConfidence,
     );
   }

@@ -20,6 +20,9 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selected = ref.watch(selectedUserProvider);
+    final gesture = ref.watch(selectedGestureProvider);
+    // 앱 시작 시 GET /config를 불러 등록 회차 수 등을 받아온다. (backend/README 4.4)
+    final configState = ref.watch(serverConfigProvider);
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -39,6 +42,10 @@ class HomeScreen extends ConsumerWidget {
               const Text('인증할 사용자', style: AppText.caption),
               const SizedBox(height: 8),
               _UserDropdown(selected: selected),
+              const SizedBox(height: 16),
+              const Text('수어 암호', style: AppText.caption),
+              const SizedBox(height: 8),
+              _GestureDropdown(selected: gesture),
               const SizedBox(height: 32),
               PrimaryButton(
                 label: '인증하기',
@@ -55,6 +62,14 @@ class HomeScreen extends ConsumerWidget {
                 onPressed: () => _push(context, const AdminScreen()),
               ),
               const Spacer(flex: 3),
+              if (configState.error != null) ...[
+                Text(
+                  configState.error!,
+                  textAlign: TextAlign.center,
+                  style: AppText.caption.copyWith(color: AppColors.danger),
+                ),
+                const SizedBox(height: 8),
+              ],
               // 지금 어떤 모드로 도는지 한눈에 보이게 한다. 목/실서버, 가짜/실카메라를
               // 헷갈린 채로 테스트하면 원인을 엉뚱한 데서 찾게 된다.
               const Center(child: _ModeChips()),
@@ -102,6 +117,44 @@ class _UserDropdown extends ConsumerWidget {
           onChanged: (value) {
             if (value != null) {
               ref.read(selectedUserProvider.notifier).select(value);
+            }
+          },
+        ),
+      ),
+    );
+  }
+}
+
+/// 등록·인증에 쓸 수어 암호 선택.
+///
+/// 서버는 이 값(gestureId)으로 템플릿을 조회한다. 지금은 G1~G5이고, AI팀이 개인
+/// 제스처 ID 방식을 주면 [kGestureIds]의 값만 바뀐다. (backend/README 2장)
+class _GestureDropdown extends ConsumerWidget {
+  final String selected;
+
+  const _GestureDropdown({required this.selected});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppShape.cardRadius),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: selected,
+          isExpanded: true,
+          dropdownColor: AppColors.surface,
+          style: AppText.body,
+          items: [
+            for (final id in kGestureIds)
+              DropdownMenuItem(value: id, child: Text('수어 암호 $id')),
+          ],
+          onChanged: (value) {
+            if (value != null) {
+              ref.read(selectedGestureProvider.notifier).select(value);
             }
           },
         ),

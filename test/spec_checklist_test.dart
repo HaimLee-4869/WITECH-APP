@@ -6,7 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:signid/core/theme.dart';
 import 'package:signid/models/auth_log.dart';
 import 'package:signid/models/enroll.dart';
+import 'package:signid/models/camera_info.dart';
 import 'package:signid/models/landmark.dart';
+import 'package:signid/models/server_config.dart';
 import 'package:signid/models/verify.dart';
 import 'package:signid/screens/auth_screen.dart';
 import 'package:signid/services/api_client.dart';
@@ -19,6 +21,9 @@ import 'test_helpers.dart';
 /// SPEC 11장 완료 기준 중 코드로 확인할 수 있는 항목들을 직접 검증한다.
 
 class _StubApi implements ApiClient {
+  @override
+  Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
+
   final Future<VerifyResponse> Function(VerifyRequest) onVerify;
 
   _StubApi(this.onVerify);
@@ -42,6 +47,9 @@ class _StubApi implements ApiClient {
 /// 카메라 권한이 거부된 상황을 흉내 내는 소스.
 class _DeniedSource implements LandmarkSource {
   final _controller = StreamController<HandFrame>.broadcast();
+
+  @override
+  CameraInfo? get imageSize => const CameraInfo(width: 720, height: 1280);
 
   @override
   Stream<HandFrame> get frames => _controller.stream;

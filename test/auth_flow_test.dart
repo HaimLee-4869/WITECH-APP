@@ -1,6 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:signid/core/config.dart';
+import 'package:signid/models/api_error.dart';
+import 'package:signid/models/camera_info.dart';
+import 'package:signid/models/server_config.dart';
 import 'package:signid/models/verify.dart';
 import 'package:signid/services/api_client.dart';
 import 'package:signid/services/mock_api_client.dart';
@@ -14,14 +17,20 @@ class _AlwaysPassApi implements ApiClient {
   VerifyRequest? lastRequest;
 
   @override
+  Future<ServerConfig> fetchConfig() async => ServerConfig.fallback;
+
+  @override
   Future<VerifyResponse> verify(VerifyRequest req) async {
     lastRequest = req;
     await Future<void>.delayed(const Duration(milliseconds: 50));
     return const VerifyResponse(
       score: 0.91,
-      threshold: 0.72,
+      threshold: 0.6275163888931274,
       passed: true,
       latencyMs: 50,
+      gestureId: 'G1',
+      predictedGesture: 'G2',
+      gestureConfidence: 0.81,
     );
   }
 
@@ -84,7 +93,7 @@ void main() {
     expect(res, isNotNull);
     expect(res!.passed, isTrue);
     // threshold는 응답에서 온 값이어야 한다.
-    expect(res.threshold, 0.72);
+    expect(res.threshold, 0.6275163888931274);
   }, timeout: const Timeout(Duration(seconds: 40)));
 
   test('전송 요청의 tMs가 실제 경과 시간이고 균등 간격이 아니다', () async {
@@ -143,22 +152,29 @@ void main() {
     }
   }, timeout: const Timeout(Duration(seconds: 40)));
 
-  test('목 API는 프레임이 부족하면 insufficient_frames로 거절한다', () async {
+  test('목 API는 프레임이 부족하면 서버처럼 422 사유 코드로 거절한다', () async {
     // 시드를 고정해 5% 타임아웃에 걸리지 않게 한다.
     final api = MockApiClient(seed: 7);
-    final res = await api.verify(
+    final call = api.verify(
       VerifyRequest(
         userId: 'kim',
+        gestureId: 'G1',
+        camera: const CameraInfo(width: 720, height: 1280),
         capturedAt: DateTime(2026, 8, 24),
         nominalFps: kNominalFps,
         durationMs: 2000,
         frames: const [],
       ),
     );
-    expect(res.passed, isFalse);
-    expect(res.reason, 'insufficient_frames');
-    // 실패해도 threshold는 응답에 담겨 온다.
-    expect(res.threshold, greaterThan(0));
+    await expectLater(
+      call,
+      throwsA(
+        isA<ApiException>()
+            .having((e) => e.reason, 'reason', 'insufficient_valid_frames')
+            .having((e) => e.statusCode, 'statusCode', 422)
+            .having((e) => e.userMessage, 'userMessage', '손이 잘 보이도록 다시 시도해주세요.'),
+      ),
+    );
   });
 
   test('목 API는 응답 지연을 흉내 낸다', () async {
@@ -177,6 +193,8 @@ void main() {
         await MockApiClient(seed: seed).verify(
           VerifyRequest(
             userId: 'kim',
+            gestureId: 'G1',
+            camera: const CameraInfo(width: 720, height: 1280),
             capturedAt: DateTime(2026, 8, 24),
             nominalFps: kNominalFps,
             durationMs: 2000,
