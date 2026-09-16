@@ -240,8 +240,18 @@ class _MonthlyChartCard extends StatelessWidget {
 
   const _MonthlyChartCard({required this.stats});
 
-  /// Y축 최대값. 목업 기준 0~500. (SPEC 8.5)
-  static const double _maxY = 500;
+  /// Y축 최대값의 하한. 실제 건수가 적어도 선이 바닥에 붙지 않게 한다.
+  ///
+  /// 시연 초기에는 이력이 몇 건뿐이라 목업의 고정 500을 쓰면 선이 0에 붙어
+  /// 아무것도 읽을 수 없다. 데이터에 맞춰 눈금을 잡는다.
+  static const double _minMaxY = 8;
+
+  /// 데이터에 맞춘 Y축 최대값. 4로 나누어떨어지는 값으로 올린다.
+  double get _maxY {
+    final peak = stats.fold<int>(0, (m, s) => s.total > m ? s.total : m);
+    if (peak <= _minMaxY) return _minMaxY;
+    return (peak / 4).ceil() * 4.0;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -267,6 +277,14 @@ class _MonthlyChartCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 순번(X값) → '9월'. 범위를 벗어나거나 형식이 깨지면 빈 문자열.
+  String _monthLabel(double value) {
+    final index = value.round();
+    if (index < 0 || index >= stats.length) return '';
+    final month = stats[index].monthNumber;
+    return month == 0 ? '' : '$month월';
   }
 
   LineChartData _chartData() {
@@ -310,10 +328,12 @@ class _MonthlyChartCard extends StatelessWidget {
             showTitles: true,
             interval: 1,
             reservedSize: 28,
+            // X값은 순번이므로 라벨은 해당 항목의 '월'로 바꿔 보여준다.
+            // 그냥 값을 쓰면 0월~4월이 된다.
             getTitlesWidget: (value, _) => Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
-                '${value.toInt()}월',
+                _monthLabel(value),
                 style: AppText.caption.copyWith(fontSize: 11),
               ),
             ),
