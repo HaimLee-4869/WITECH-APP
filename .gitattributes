@@ -1,0 +1,7 @@
+# AI 릴리스는 바이트 그대로 보존한다.
+#
+# Windows에서 core.autocrlf가 켜져 있으면 체크아웃 때 LF가 CRLF로 바뀌어
+# manifest.json의 sha256이 전부 깨진다(2026-09-17에 실제로 겪었다).
+# 릴리스 무결성 검증(scripts/verify_ai_release.py)이 성립하려면 변환이 없어야 한다.
+backend/ai/** -text
+backend/ai_v1.0.0_baseline/** -text

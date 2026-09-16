@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Depends, Request
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -12,6 +13,7 @@ from app.deps import get_db
 from app.errors import ApiError, not_found
 from app.routers.config import get_config
 from app.schemas import (
+    ChallengeConfigOut,
     ConfigOut,
     ConfigPatch,
     ReindexRequest,
@@ -77,8 +79,73 @@ async def reindex(body: ReindexRequest, request: Request) -> ReindexResponse:
     return await run_in_threadpool(work)
 
 
+def _deep_merge(base: dict, patch: dict) -> dict:
+    """patch의 키만 base 위에 덮는다. dict는 재귀, 그 외(리스트 포함)는 통째 교체.
+
+    directionMap이나 shapePool을 부분 병합하면 중간 상태(방향 하나만 바뀐 표)가
+    생기므로 리스트·표는 통째로 바꾼다.
+    """
+    out = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        else:
+            out[key] = value
+    return out
+
+
+def _patch_challenge(session: Session, patch: dict) -> None:
+    """Challenge 설정을 깊은 병합 후 검증해 저장한다. 실패하면 아무것도 바꾸지 않는다."""
+    current = cfg.get_challenge_config(session)
+    merged = _deep_merge(current, patch)
+    try:
+        validated = ChallengeConfigOut.model_validate(merged)
+    except ValidationError as exc:
+        raise ApiError(
+            422, "invalid_request", "invalid_challenge_config",
+            f"Challenge 설정이 올바르지 않습니다: {exc.errors()[0]['msg']}",
+        ) from exc
+
+    # 앱은 프레임 수를 frameReferenceFps 기준 시간으로 바꿔 쓴다. 바뀐 값이
+    # 실기기에서 몇 ms가 되는지 로그에 같이 남긴다. 안 보이면 감이 안 잡힌다.
+    frame_ms = 1000.0 / validated.frame_reference_fps
+    for path, before, after in _changed_leaves(current, merged):
+        note = ""
+        if path.endswith("Frames"):
+            note = f"  ({after}프레임 = {float(after) * frame_ms:.0f}ms @ {validated.frame_reference_fps}fps)"
+        log.warning("challenge.%s %s → %s%s", path, before, after, note)
+
+    steps = validated.steps.num_shapes + validated.steps.num_moves
+    if validated.timing.total_timeout_ms < validated.timing.per_action_timeout_ms * steps:
+        log.warning(
+            "challenge.timing: totalTimeoutMs=%s가 perActionTimeoutMs(%s) × 단계 %d = %s보다 "
+            "작다. 마지막 단계가 TOTAL_TIMEOUT으로 죽을 수 있다.",
+            validated.timing.total_timeout_ms, validated.timing.per_action_timeout_ms,
+            steps, validated.timing.per_action_timeout_ms * steps,
+        )
+
+    cfg.set_value(session, cfg.CHALLENGE, merged)
+
+
+def _changed_leaves(before: dict, after: dict, prefix: str = "") -> list[tuple[str, object, object]]:
+    """실제로 값이 바뀐 잎만 (경로, 이전, 이후)로 모은다."""
+    changed: list[tuple[str, object, object]] = []
+    for key, new in after.items():
+        if key.startswith("_"):
+            continue
+        old = before.get(key)
+        path = f"{prefix}{key}"
+        if isinstance(new, dict) and isinstance(old, dict):
+            changed.extend(_changed_leaves(old, new, f"{path}."))
+        elif old != new:
+            changed.append((path, old, new))
+    return changed
+
+
 @router.patch("/config", response_model=ConfigOut)
 def patch_config(body: ConfigPatch, session: Session = Depends(get_db)) -> ConfigOut:
+    if body.challenge is not None:
+        _patch_challenge(session, body.challenge)
     for field, key in (
         ("enrollment_takes", cfg.ENROLLMENT_TAKES),
         ("enrollment_gestures", cfg.ENROLLMENT_GESTURES),

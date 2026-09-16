@@ -20,13 +20,17 @@ GESTURE = "G3"
 # --- /config --------------------------------------------------------------------
 
 def test_config_defaults(client):
-    assert client.get("/config").json() == {
+    body = client.get("/config").json()
+    # challenge는 덩어리가 커서 따로 본다 (tests/test_challenge_config.py).
+    challenge = body.pop("challenge")
+    assert body == {
         "enrollmentTakes": 3,
         "enrollmentGestures": 1,
         "captureDurationMs": 4000,
         "handRequired": "right",
         "modelVersion": encoder.MODEL_VERSION,
     }
+    assert challenge["steps"] == {"numShapes": 2, "numMoves": 1}
 
 
 def test_config_reads_app_config_table(client, db):

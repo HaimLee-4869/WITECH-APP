@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -14,8 +15,22 @@ ENROLLMENT_TAKES = "enrollmentTakes"
 ENROLLMENT_GESTURES = "enrollmentGestures"
 CAPTURE_DURATION_MS = "captureDurationMs"
 HAND_REQUIRED = "handRequired"
+# 안티스푸핑 Challenge 판정값 묶음. 앱이 이 값으로 판정하므로 앱에 상수가 없다.
+CHALLENGE = "challenge"
 # templates/embeddings 조회에 쓰는 활성 인증 모델 버전. 재색인이 끝나야 바뀐다.
 ACTIVE_MODEL_VERSION = "activeModelVersion"
+
+_CHALLENGE_DEFAULTS_PATH = Path(__file__).resolve().parent.parent / "default_challenge_config.json"
+
+
+def default_challenge_config() -> dict[str, Any]:
+    """번들된 기본 Challenge 설정. DB에 행이 없을 때 쓴다.
+
+    원본은 `challenge_response/configs/challenge_config.json`이고, 판정에 쓰는 값만
+    camelCase로 옮겨 놓았다. 자유 제스처 데이터로 재도출하면
+    `scripts/import_challenge_config.py`로 DB를 갱신한다(이 파일은 그대로 둬도 된다).
+    """
+    return json.loads(_CHALLENGE_DEFAULTS_PATH.read_text(encoding="utf-8"))
 
 DEFAULTS: dict[str, Any] = {
     ENROLLMENT_TAKES: 3,
@@ -32,8 +47,14 @@ DEFAULTS: dict[str, Any] = {
 def get_value(session: Session, key: str, default: Any = None) -> Any:
     row = session.get(AppConfig, key)
     if row is None or row.value is None:
+        if key == CHALLENGE:
+            return default_challenge_config()
         return DEFAULTS.get(key, default)
     return json.loads(row.value)
+
+
+def get_challenge_config(session: Session) -> dict[str, Any]:
+    return get_value(session, CHALLENGE)
 
 
 def set_value(session: Session, key: str, value: Any) -> None:

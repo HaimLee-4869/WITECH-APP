@@ -1,0 +1,44 @@
+{
+  "_note": "challenge_response/configs/challenge_config.json의 판정용 값만 camelCase로 옮긴 것. 도출 근거(_source)는 원본에 있다. scripts/import_challenge_config.py로 갱신한다.",
+  "ruleVersion": "2026-09-16.opposite-first-fails",
+  "angleSpace": "image_iso",
+  "coordinateFrame": "mirrored",
+  "frameReferenceFps": 30.0,
+  "fingerExtendedAngle": {
+    "thumb": 148.9,
+    "others": 135.9
+  },
+  "fistMaxTipWristRatio": 0.909,
+  "shapeHoldFrames": 7,
+  "shapeConfidenceMarginDeg": 30.5,
+  "shapeConfidenceMin": null,
+  "escapeFrames": 14,
+  "movement": {
+    "windowMs": 600,
+    "minDisplacementRatio": 0.226,
+    "axisDominanceRatio": 3.634,
+    "maxDurationMs": 2500,
+    "restDisplacementRatio": 0.086,
+    "directionMap": {
+      "MOVE_LEFT": ["x", -1],
+      "MOVE_RIGHT": ["x", 1],
+      "MOVE_UP": ["y", -1],
+      "MOVE_DOWN": ["y", 1]
+    }
+  },
+  "timing": {
+    "perActionTimeoutMs": 2000,
+    "totalTimeoutMs": 6000,
+    "maxRetries": 1
+  },
+  "tracking": {
+    "maxLostFrames": 38,
+    "minDetectionScore": 0.938
+  },
+  "steps": {
+    "numShapes": 2,
+    "numMoves": 1
+  },
+  "shapePool": ["OPEN_PALM", "FIST", "INDEX", "TWO_FINGERS"],
+  "movePool": ["MOVE_LEFT", "MOVE_RIGHT", "MOVE_UP", "MOVE_DOWN"]
+}

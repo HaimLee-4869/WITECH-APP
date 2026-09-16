@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from ai import encoder
 from app.database import Database
 from app.deps import get_database, get_db
-from app.schemas import ConfigOut, HealthOut
+from app.schemas import ChallengeConfigOut, ConfigOut, HealthOut
 from app.services import app_config_service as cfg
 from app.services import threshold_service
 
@@ -23,6 +23,8 @@ def get_config(session: Session = Depends(get_db)) -> ConfigOut:
         capture_duration_ms=int(cfg.get_value(session, cfg.CAPTURE_DURATION_MS)),
         hand_required=str(cfg.get_value(session, cfg.HAND_REQUIRED)),
         model_version=cfg.get_active_model_version(session) or encoder.MODEL_VERSION,
+        # Challenge 판정은 앱이 하지만 임계값은 여기서 내려준다. 앱에 상수가 없다.
+        challenge=ChallengeConfigOut.model_validate(cfg.get_challenge_config(session)),
     )
 
 

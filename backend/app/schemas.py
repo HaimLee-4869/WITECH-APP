@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -165,12 +165,89 @@ class MonthlyStat(ResponseModel):
 
 # --- /config, /health -----------------------------------------------------------
 
+# --- 안티스푸핑 Challenge 설정 -----------------------------------------------------
+#
+# 판정은 앱이 하지만 임계값은 전부 서버가 소유한다. 앱에 상수로 박으면 자유 제스처
+# 데이터로 재도출했을 때 앱을 다시 배포해야 한다.
+# 원본은 challenge_response/configs/challenge_config.json (도출 근거 _source 포함).
+
+class FingerExtendedAngleOut(ResponseModel):
+    """손가락이 '펴졌다'고 볼 최소 관절 각도(도)."""
+    thumb: float = Field(gt=0.0, lt=180.0)
+    others: float = Field(gt=0.0, lt=180.0)
+
+
+class ChallengeMovementOut(ResponseModel):
+    window_ms: float = Field(gt=0.0, le=5000.0)
+    min_displacement_ratio: float = Field(gt=0.0, le=10.0)
+    axis_dominance_ratio: float = Field(gt=1.0, le=50.0)
+    max_duration_ms: float = Field(gt=0.0, le=30000.0)
+    rest_displacement_ratio: float = Field(ge=0.0, le=10.0)
+    # {"MOVE_LEFT": ["x", -1], ...}. 축→방향 대응도 추측이 아니라 영상에서 도출했다.
+    direction_map: dict[str, tuple[str, int]]
+
+
+class ChallengeTimingOut(ResponseModel):
+    per_action_timeout_ms: float = Field(gt=0.0, le=30000.0)
+    total_timeout_ms: float = Field(gt=0.0, le=60000.0)
+    max_retries: int = Field(ge=0, le=5)
+
+
+class ChallengeTrackingOut(ResponseModel):
+    max_lost_frames: int = Field(ge=1, le=300)
+    min_detection_score: float = Field(ge=0.0, le=1.0)
+
+
+class ChallengeStepsOut(ResponseModel):
+    """단계 구성. 3단계(손 모양 2 + 이동 1)가 기본이다."""
+    num_shapes: int = Field(ge=0, le=4)
+    num_moves: int = Field(ge=0, le=4)
+
+
+class ChallengeConfigOut(ResponseModel):
+    rule_version: str
+    angle_space: str = Field(pattern=r"^(image_iso|world)$")
+    coordinate_frame: str = Field(pattern=r"^(raw|mirrored)$")
+    # shapeHoldFrames 등 '프레임 수' 값은 이 fps의 파일럿 영상에서 센 것이다.
+    # 앱은 이 fps 기준 시간(ms)으로 바꿔 판정한다. 실기기는 13~16fps다.
+    frame_reference_fps: float = Field(gt=0.0, le=240.0)
+    finger_extended_angle: FingerExtendedAngleOut
+    # null이면 FIST 게이트를 끈다(도출 실패 시). 임의의 값을 넣지 않는다.
+    fist_max_tip_wrist_ratio: float | None = Field(default=None, gt=0.0, le=10.0)
+    shape_hold_frames: int = Field(ge=1, le=120)
+    shape_confidence_margin_deg: float = Field(gt=0.0, le=180.0)
+    # null이면 신뢰도 게이트를 끈다. 04가 '신뢰도로는 더 못 거른다'를 측정으로 확인했다.
+    shape_confidence_min: float | None = Field(default=None, ge=0.0, le=1.0)
+    # 0이면 이탈 관문을 끈다.
+    escape_frames: int = Field(ge=0, le=120)
+    movement: ChallengeMovementOut
+    timing: ChallengeTimingOut
+    tracking: ChallengeTrackingOut
+    steps: ChallengeStepsOut
+    shape_pool: list[str] = Field(min_length=1)
+    move_pool: list[str] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check_pools(self):
+        if self.steps.num_shapes > len(self.shape_pool):
+            raise ValueError("numShapes가 shapePool보다 많다. 서로 다른 모양을 뽑을 수 없다")
+        if self.steps.num_moves > len(self.move_pool):
+            raise ValueError("numMoves가 movePool보다 많다")
+        if self.steps.num_shapes + self.steps.num_moves < 1:
+            raise ValueError("단계가 0개인 Challenge는 만들 수 없다")
+        missing = set(self.move_pool) - set(self.movement.direction_map)
+        if missing:
+            raise ValueError(f"directionMap에 없는 이동: {sorted(missing)}")
+        return self
+
+
 class ConfigOut(ResponseModel):
     enrollment_takes: int
     enrollment_gestures: int
     capture_duration_ms: int
     hand_required: str
     model_version: str
+    challenge: ChallengeConfigOut
 
 
 class ConfigPatch(CamelModel):
@@ -178,6 +255,9 @@ class ConfigPatch(CamelModel):
     enrollment_gestures: int | None = Field(default=None, ge=1, le=5)
     capture_duration_ms: int | None = Field(default=None, ge=750, le=10000)
     hand_required: str | None = Field(default=None, pattern=r"^(right|left|any)$")
+    # 일부 키만 보내면 저장된 값에 깊은 병합 후 ChallengeConfigOut으로 검증한다.
+    # 예: {"challenge": {"timing": {"perActionTimeoutMs": 2500}}}
+    challenge: dict | None = None
 
 
 class HealthOut(ResponseModel):
