@@ -480,6 +480,53 @@ python scripts/clear_enrollments.py             # 원본·임베딩·템플릿 �
 
 ---
 
+## 6.5 Challenge 설정 (안티스푸핑)
+
+판정은 **앱이** 한다. 서버는 임계값만 내려준다. 앱에 상수로 박으면 자유 제스처
+데이터로 재도출했을 때 앱을 다시 배포해야 하기 때문이다.
+
+- 원본: `challenge_response/configs/challenge_config.json` (도출 근거 `_source` 포함)
+- 서버 기본값: `app/default_challenge_config.json` (판정용 값만 camelCase로)
+- 저장 위치: `app_config` 테이블의 `challenge` 키
+- 앱 전달: `GET /config`의 `challenge` 블록
+
+```bash
+# 원본이 갱신되면 DB에 반영 (서버 재시작 불필요)
+python scripts/import_challenge_config.py --dry-run
+python scripts/import_challenge_config.py
+
+# 실기기 체감에 맞춰 일부만 조정
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
+  -d '{"challenge": {"timing": {"perActionTimeoutMs": 2500}}}'
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
+  -d '{"challenge": {"escapeFrames": 8, "shapeHoldFrames": 5}}'
+
+# 단계 수 (3단계 → 2단계). 코드 수정 없이 바뀐다
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
+  -d '{"challenge": {"steps": {"numShapes": 1, "numMoves": 1}, "timing": {"totalTimeoutMs": 4000}}}'
+```
+
+PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로다. 단, `directionMap`은
+통째로 바뀐다 — 방향 하나만 바뀐 표가 남으면 나머지가 옛 도출값이 되어 조용히
+어긋나기 때문이다. 검증에 실패하면 **아무것도 바꾸지 않는다.**
+
+로그에 남는 것:
+- 바뀐 값마다 이전 → 이후. 프레임 수 값은 `frameReferenceFps` 기준 몇 ms인지 함께
+- `totalTimeoutMs < perActionTimeoutMs × 단계 수`면 경고 (마지막 단계가 죽는다)
+
+**null은 null로 둔다.** `shapeConfidenceMin`은 "분포가 겹쳐 도출하지 못했다"는 뜻이고
+0으로 채우면 게이트가 켜진 것처럼 보인다. `fistMaxTipWristRatio`도 마찬가지다.
+
+### 앱 쪽 제약 (앱 README에도 있다)
+
+- **`minDetectionScore`는 앱에서 작동하지 않는다.** `hand_landmarker` 3.0.1이 검출
+  신뢰도를 주지 않아 값이 항상 null이고, 판정기는 값이 있을 때만 이 관문을 본다.
+  `TRACKING_UNSTABLE`은 앱에서 발생하지 않는다.
+- **`maxLostFrames = 38`은 측정값이 아니다.** 근거 부족으로 도출하지 못해 2026-09-16에
+  정한 임시값이다. 실사용 세션이 쌓이면 다시 재야 한다.
+- 앱 판정이라 **앱을 조작하면 우회된다.** 서버는 Challenge 결과를 받지도 검증하지도
+  않는다. 실제 출입 통제에 쓰려면 서버 판정으로 바꿔야 한다.
+
 ## 7. ai_release 교체 절차
 
 ### 7.0 가장 먼저: AI 입력 형태 확인
@@ -600,6 +647,11 @@ AI팀 문서가 "validation Gesture EER 0%를 자유 제스처 성능으로 제�
 - **자유 제스처는 아직 미검증**: 체크포인트는 여전히 G1~G5로 학습됐다. 구조적으로는 제스처를
   임베딩으로 보므로 개인 제스처가 가능하지만, AI팀이 "unseen free-gesture generalization is not
   yet validated"라고 명시했다.
+- **Challenge는 앱이 판정한다**: 서버는 임계값만 내려주고 결과를 검증하지 않는다.
+  앱을 조작하면 동작 없이 통과시킬 수 있다. 시연 범위의 결정이다 (6.5장).
+- **Challenge의 검출 신뢰도 관문이 꺼져 있다**: 플러그인이 신뢰도를 주지 않아
+  `minDetectionScore`가 앱에서 적용되지 않는다. `TRACKING_UNSTABLE`이 발생하지 않는다.
+- **Challenge `maxLostFrames`는 임시값**: 38은 측정으로 도출한 값이 아니다.
 - **모델을 바꾸면 등록이 무효다**: v1.0.0 → v1.1.1처럼 벡터 공간이 달라지면 재색인으로 해결되지 않는다
   (재색인은 같은 모델의 임베딩 재생성이다). `scripts/clear_enrollments.py` 후 전원 재등록.
 - **등록 정책**: 릴리스 기준 "개인 제스처 1개 × 3회"다 (`enrollmentGestures=1`, `enrollmentTakes=3`).

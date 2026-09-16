@@ -192,6 +192,15 @@ lib/
     config.dart                  플래그와 튜닝 상수
     theme.dart                   색상/타이포/모양 토큰
     hand_connections.dart        MediaPipe 21점 연결 정의
+  challenge/                     안티스푸핑 판정 (challenge_response 이식)
+    challenge_config.dart        서버가 주는 임계값 (앱에 상수 없음)
+    geometry.dart                각도·손크기·손끝거리
+    window_motion.dart           변위와 주축비
+    hand_action_detector.dart    손 모양 패턴 매칭
+    movement_detector.dart       이동 방향 (라벨만 거울 반전)
+    challenge_generator.dart     무작위 동작 생성 (Random.secure)
+    challenge_state_machine.dart 순서·시간·이탈 관문·반대방향 규칙
+    hand_sketch.dart             안내 그림 좌표 (판정 규칙에서 생성)
   models/
     landmark.dart                Landmark, HandFrame
     verify.dart                  VerifyRequest, VerifyResponse
@@ -293,6 +302,101 @@ done          결과 화면으로 전환
 정확도가 떨어지는 조용한 실패로 이어지므로, 플러그인이 handedness를 주게 되면
 `OnDeviceLandmarkSource._toHandFrame()`에서 그 값을 실어 보내고
 `kPluginProvidesHandedness`를 `true`로 바꾼다. 그때부터 서버가 왼손을 거른다.
+
+## 안티스푸핑 Challenge (`lib/challenge/`)
+
+인증 화면 **앞에** 붙는 단계다. 서버가 아니라 **앱이 무작위 동작 3개(손 모양 2 +
+이동 1)를 내고 앱이 판정한다.** 통과해야 제스처 인증으로 넘어가고, 실패하면
+`/verify`를 호출하지 않는다.
+
+판정 규칙은 `challenge_response/`(파이썬 프로토타입)에서 그대로 옮겼다. 두 구현이
+갈라지지 않도록 파이썬 실행 결과를 `test/challenge/golden/cross_impl.json`에 남기고
+Dart 테스트가 그 파일과 비교한다. 규칙을 고치면 골든을 다시 뽑아야 하고, 안 뽑으면
+`challenge_response/tests/test_dart_golden.py`가 실패한다.
+
+```
+challenge_response/scripts/export_dart_golden.py   # 규칙을 고친 뒤 다시 실행
+```
+
+### ⚠️ 앱에서 판정하는 것의 보안 한계
+
+**앱을 조작하면 Challenge를 하지 않고도 "통과했다"고 만들 수 있다.** 판정이 기기
+안에서 끝나고 서버는 그 결과를 받지도, 검증하지도 않는다. 루팅한 기기나 수정한
+APK에는 아무 방어가 없다.
+
+그럼에도 앱에서 판정하는 이유는 **실시간 피드백** 때문이다. 남은 시간, 지금 검출된
+손 모양, 이탈 관문 진행도를 프레임마다 보여줘야 사용자가 동작을 맞출 수 있는데,
+서버 왕복으로는 그 지연을 감당할 수 없다.
+
+시연 범위에서 내린 결정이고, 실제 출입 통제에 쓰려면 **랜드마크를 서버로 보내
+서버가 판정하는 구조로 바꿔야 한다.** 그때도 화면 피드백은 앱이 하고, 최종 판정만
+서버가 다시 하는 이중 구조가 현실적이다.
+
+### 좌표계 규칙 (이중 반전 주의)
+
+```
+MediaPipe 입력      원본 그대로
+서버 전송 좌표      원본 그대로
+화면 표시·오버레이   거울 (좌우 반전)
+방향 판정           좌표는 원본, **라벨만** 좌우를 바꾼다
+```
+
+`coordinateFrame: "mirrored"`는 **좌표를 뒤집으라는 뜻이 아니다.** 판정기가 센서
+좌표로 방향을 구한 다음 `MOVE_LEFT ↔ MOVE_RIGHT` 라벨만 바꾼다. 사용자는 거울
+화면을 보고 있어서, 센서 기준 오른쪽으로 간 손이 화면에서는 왼쪽으로 보이기
+때문이다. 상하는 거울에 영향받지 않는다.
+
+**좌표를 미리 뒤집고 라벨도 뒤집으면 반전이 상쇄되어 좌우가 도로 맞아버린다.**
+이 프로젝트에서 이중 반전을 두 번 겪었다(안티스푸핑 분석 때, 카메라 프리뷰 때).
+`test/challenge/movement_detector_test.dart`의 "좌표계 (거울)" 그룹과
+`cross_impl_test.dart`의 거울 대조 4건이 이 규칙을 고정한다.
+
+화살표 안내도 같은 이유로 **라벨 그대로** 그린다. 라벨이 이미 사용자가 화면에서
+보는 방향이므로 `directionMap`을 한 번 더 참조하면 화살표만 반대로 간다.
+
+### 임계값은 전부 서버에서 온다
+
+`lib/challenge/`에 임계값 상수가 없다. `GET /config`의 `challenge` 블록을 받아
+쓰고, **못 받으면 Challenge를 시작하지 않는다**(대체값을 두면 도출과 다른 기준으로
+판정하게 된다). 자유 제스처 데이터로 재도출하면 앱 재배포 없이 서버 값만 바꾼다.
+
+```bash
+# 원본(challenge_response/configs/challenge_config.json) → DB
+cd backend && python scripts/import_challenge_config.py --dry-run
+cd backend && python scripts/import_challenge_config.py
+
+# 실기기 체감에 맞춰 일부만 조정 (서버 재시작 불필요)
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
+  -d '{"challenge": {"timing": {"perActionTimeoutMs": 2500}}}'
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
+  -d '{"challenge": {"escapeFrames": 8, "shapeHoldFrames": 5}}'
+
+# 3단계 → 2단계 (코드 수정 없이)
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
+  -d '{"challenge": {"steps": {"numShapes": 1, "numMoves": 1}, "timing": {"totalTimeoutMs": 4000}}}'
+```
+
+### 프레임 수가 아니라 시간으로 잰다
+
+`shapeHoldFrames`·`escapeFrames`·`maxLostFrames`와 이동 윈도우는 **30fps 파일럿
+영상에서 센 프레임 수**다. 실기기는 13~16fps라 프레임 수로 세면 같은 조건이 두 배
+넘게 긴 시간이 된다. 앱은 `frameReferenceFps` 기준 시간(ms)으로 바꿔 판정한다.
+
+같은 실수를 이미 두 번 했다. `challenge_response`가 웹캠 20fps에서, 앱이
+`handReady` 판정에서 겪었다. `test/challenge/time_based_frames_test.dart`가 14fps와
+30fps에서 같은 시간이 걸리는지 확인한다.
+
+### Challenge의 알려진 한계
+
+| 한계 | 상세 |
+|---|---|
+| **앱 판정** | 앱을 조작하면 우회된다. 서버가 검증하지 않는다 (위 참고) |
+| **검출 신뢰도 관문이 꺼져 있다** | `minDetectionScore=0.938`을 받지만 `hand_landmarker` 3.0.1이 신뢰도를 주지 않아 `HandFrame.score`가 항상 null이다. 판정기는 값이 있을 때만 이 관문을 보므로 **`TRACKING_UNSTABLE`은 앱에서 절대 발생하지 않는다.** 흔들리는 손을 거를 관문 하나가 없는 상태다 |
+| **`maxLostFrames`가 측정값이 아니다** | 38은 임시값이다. 정상 영상의 중간 끊김이 1건뿐이라(최소 20건 필요) p95를 도출하지 못했고, 2026-09-16에 임시로 정한 값이다. 30fps 기준 1,267ms에 해당한다. **실사용 세션이 쌓이면 다시 재야 한다** |
+| 1단계에는 이탈 관문이 없다 | 시작 시점에 이미 1단계 손 모양이면 그대로 통과된다. 매번 시작 자세를 요구하는 비용이 더 크다고 봤다(challenge_response README 5.7). 2·3단계에는 관문이 있어 정지된 손 하나로 전체를 통과할 수는 없다 |
+| 이동 방향 근거가 좁다 | `directionMap`의 상하는 참가자 1명(P05)의 영상 4개에 기댄다 |
+| `shapeConfidenceMin`이 null | 분포가 겹쳐 도출하지 못했다. 신뢰도 게이트를 끈 채로 간다 |
+| 실기기 미검증 | Challenge 단계 자체를 실기기에서 아직 돌려보지 않았다. 통과율과 체감 시간을 측정해 `perActionTimeoutMs`·`escapeFrames`·`shapeHoldFrames`를 조정해야 한다 |
 
 ## 실기기 검증 기록
 
