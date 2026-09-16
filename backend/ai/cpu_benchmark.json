@@ -1,0 +1,26 @@
+{
+  "platform": "macOS-26.6.2-arm64-arm-64bit",
+  "python": "3.9.6",
+  "torch_version": "2.8.0",
+  "torch_threads": 6,
+  "embed_end_to_end": {
+    "mean_ms": 1.730057366666668,
+    "median_ms": 1.691854500000034,
+    "p95_ms": 1.9947309499999621
+  },
+  "gesture_end_to_end": {
+    "mean_ms": 1.6194447199999955,
+    "median_ms": 1.5826044999999178,
+    "p95_ms": 1.798429199999907
+  },
+  "embed_batch_16_total": {
+    "mean_ms": 25.48007797999999,
+    "median_ms": 25.54091700000005,
+    "p95_ms": 26.415974999999946
+  },
+  "concurrency": {
+    "workers": 8,
+    "calls": 64,
+    "all_equal": true
+  }
+}

@@ -3,8 +3,8 @@
 수어 제스처 기반 비접촉 인증 시스템의 FastAPI 백엔드. Flutter 앱과 AI 모델 사이를 연결하고
 사용자·등록·인증 이력을 관리한다. 설계 근거는 [`../BACKEND_SPEC.md`](../BACKEND_SPEC.md).
 
-> ⚠️ **현재 `ai/`는 스텁이다.** 임베딩과 제스처 분류가 가짜 값이다. 흐름(등록 → 인증 → 재색인)은
-> 진짜처럼 동작하지만 실제 사람의 동작 인식 성능과는 무관하다. [`ai/stub_notice.md`](ai/stub_notice.md)
+> `ai/`에는 AI팀 릴리스 `handonly-supcon-v1.0.0`이 들어 있다 (2026-09-16 교체).
+> 원본은 `ai/AI_RELEASE_README.md`, `ai/manifest.json`. 성능 한계는 [9장](#9-알려진-한계)을 볼 것.
 
 목차
 
@@ -38,7 +38,7 @@ uvicorn app.main:app --reload     # http://127.0.0.1:8000/docs
 startup에서 자동으로 한다:
 
 - `alembic upgrade head` (스키마 생성·마이그레이션)
-- `ai.encoder.load_model()` **1회**
+- `ai.encoder.load_model()` **1회** (가중치 로드, 약 1초)
 - 기본 데이터: 제스처 G1~G5, threshold 3종(far1 활성), `app_config` 기본값. 이미 있으면 덮어쓰지 않는다.
 
 시연용 사용자·이력 (관리자 화면이 비어 보이지 않게):
@@ -68,15 +68,19 @@ pytest                                      # 테스트마다 임시 SQLite
 | `AI_DEVICE` | `cpu` | `load_model(device=...)` |
 | `LOG_LEVEL` | `INFO` | |
 | `CORS_ORIGINS` | `*` | 쉼표 구분 |
-| `USE_GESTURE_CLASSIFIER` | `true` | `/verify`에서 템플릿을 고르는 방식. 아래 참고 |
+| `USE_GESTURE_CLASSIFIER` | `false` | `/verify`에서 템플릿을 고르는 방식. 아래 참고 |
 
 #### `USE_GESTURE_CLASSIFIER`
 
-| | `true` (기본, 명세 7장) | `false` |
+| | `false` (기본, 2026-09-16 팀 결정) | `true` (명세 7장) |
 |---|---|---|
-| 템플릿 조회 키 | `classify_gesture()` 예측 제스처 | 앱이 보낸 `gestureId` |
-| `gestureId` | 선택. 보냈는데 예측과 다르면 `gesture_mismatch`로 거부 | **필수**. 없으면 422 `gesture_id_required` |
-| `classify_gesture()` 호출 | 함 | 함 (결과를 `predictedGesture`·`auth_logs.predicted_gesture_id`에 기록만, 판정에 안 씀) |
+| 템플릿 조회 키 | 앱이 보낸 `gestureId` | `classify_gesture()` 예측 제스처 |
+| `gestureId` | **필수**. 없으면 422 `gesture_id_required` | 선택. 보냈는데 예측과 다르면 `gesture_mismatch`로 거부 |
+| `classify_gesture()` 호출 | 함 (결과를 `predictedGesture`·`auth_logs.predicted_gesture_id`에 기록만, 판정에 안 씀) | 함 |
+
+**운영은 `false`다.** 제스처 분류기는 G1~G5 닫힌 집합이라 판정에 쓰지 않기로 했고,
+오분류 분석용으로 기록만 한다. 앱이 보내는 `gestureId`는 지금 G1~G5이며, AI팀이 개인 제스처 ID
+방식을 주면 **값만 바뀌고 구조는 그대로**다 (조회 키가 문자열이라 스키마 변경이 없다).
 
 응답의 `gestureId`는 실제로 템플릿 조회에 쓴 제스처다. 바꾸려면 `.env` 수정 후 서버 재시작.
 
@@ -136,7 +140,9 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
   손이 검출되지 않은 프레임은 `"lm": null`로 보내도 된다 (보내지 않아도 된다).
 - 최소 조건: 프레임 8개 이상, 손 검출 프레임 8개 이상, 첫–마지막 `tMs` 간격 750ms 이상.
   8~31프레임은 AI 모듈이 보간한다. **앱이 패딩하지 말 것.**
-- 오른손만 허용 (화면 안내). `handedness`, `score`는 선택 필드로 그대로 보내면 된다.
+- **오른손만 허용.** `frames[].handedness`를 MediaPipe 값 그대로 보낼 것. 왼손이 섞이면 422 `wrong_hand`로
+  거절된다. handedness를 아예 보내지 않으면 모델이 검사하지 못하므로 앱이 화면에서 강제해야 한다
+  (실제 왼손 입력을 `Right`로 위장해 보내면 인식률이 떨어진다).
 - `capturedAt`은 **오프셋 포함** ISO-8601 (`2026-09-16T10:39:01+09:00`). 오프셋이 없으면 UTC로 간주한다.
 - 실패 응답은 모두 `{"detail": {"code", "reason", "message"}}`. 앱은 `reason`으로 분기하고 `message`를 그대로 보여줘도 된다.
 - threshold는 **응답에서 읽는다.** 앱에 넣지 않는다.
@@ -176,7 +182,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | 필드 | 필수 | 설명 |
 |---|---|---|
 | `userId` | ✅ | |
-| `gestureId` | 선택 | `USE_GESTURE_CLASSIFIER=false`면 필수 |
+| `gestureId` | ✅ | 운영 설정(`USE_GESTURE_CLASSIFIER=false`)에서 필수 |
 | `camera.width`, `camera.height` | ✅ | |
 | `frames` | ✅ | |
 | `capturedAt`, `nominalFps`, `durationMs` | 선택 | 기록용 |
@@ -418,6 +424,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | `non_monotonic_timestamps` | `tMs`가 증가하지 않음 | 촬영 시간 정보가 올바르지 않습니다. 다시 시도해주세요. |
 | `missing_camera_size` | `camera.width`/`height` 누락 | 카메라 해상도 정보가 없습니다. 앱을 최신 버전으로 업데이트해주세요. |
 | `malformed_landmarks` | 21×3이 아니거나 NaN/Inf | 손 좌표 형식이 올바르지 않습니다. 다시 시도해주세요. |
+| `wrong_hand` | 프레임 `handedness`에 왼손이 있음 (명세 1장에 없던 조건) | 오른손을 사용해주세요. 이 모델은 오른손 동작만 인식합니다. |
 | `invalid_sequence` | 위로 분류되지 않은 AI 모듈 거절 | 입력을 처리할 수 없습니다. 다시 시도해주세요. |
 
 **그 외**
@@ -461,41 +468,50 @@ curl -X POST localhost:8000/admin/threshold -H 'Content-Type: application/json' 
 
 ## 7. ai_release 교체 절차
 
-### 7.0 가장 먼저: AI 입력 형태 확인 ⚠️ 미확정
+### 7.0 가장 먼저: AI 입력 형태 확인
 
-> **⚠️ 미확정 — 실제 모듈과 다를 수 있음.**
-> 백엔드가 `embed(frames)` / `classify_gesture(frames)`에 넘기는 `frames` 인자의 형태는
-> 명세에 없어서 **백엔드가 가정한 것**이다. 카메라 크기를 함께 넘길 방법이 시그니처에 없어 dict 하나로 묶었다.
+> **v1.0.0 교체 시 실제로 틀렸던 부분이다.** 릴리스가 바뀌면 여기부터 확인한다.
+>
+> 현재 백엔드가 `embed()` / `classify_gesture()`에 넘기는 형태 (v1.0.0 기준, 실측 확인):
 >
 > ```python
 > {
->   "camera": {"width": 720, "height": 1280},
->   "frames": [{"tMs": 0.0, "lm": [[x, y, z], ...21개] | None, "handedness": "Right", "score": 0.98}, ...]
+>   "width": 720, "height": 1280,          # 최상위. camera 중첩이 아니다
+>   "frames": [{"tMs": 0.0, "landmarks": [[x, y, z], ...21개] | None,
+>              "handedness": "Right", "valid": True}, ...]
 > }
 > ```
 >
 > 이 변환은 **`app/services/ai_gateway.py`의 `to_ai_input()` 한 곳**에만 있다.
-> 등록·인증·재색인·검증 스크립트가 모두 이 함수를 거친다. 실제 모듈과 다르면 이 함수만 고친다.
+> 등록·인증·재색인·검증 스크립트가 모두 이 함수를 거친다. 모듈이 바뀌면 이 함수만 고친다.
+>
+> `valid: true`를 붙이는 이유: 이걸 빼면 모듈이 21×3 위반·NaN 프레임을 **에러 없이 무시**해서
+> 명세 1장의 거절 조건이 동작하지 않는다.
+>
 > 함께 확인할 것:
-> - `InvalidSequenceError`에 사유 코드 속성(`reason`)이 있는지. 없으면 메시지 문구로 추정하므로
->   `ai_gateway.py`의 `_REASON_PATTERNS`가 실제 메시지와 맞는지 (7.4 스크립트가 WARN으로 알려준다)
+> - `InvalidSequenceError` 위치. v1.0.0은 `encoder.py`가 아니라 **`features.py`에만** 정의한다.
+>   백엔드는 `ai_gateway.py`가 양쪽을 다 시도해 받아온다.
+> - 예외에 사유 코드 속성(`reason`)이 있는지. v1.0.0은 없어서 메시지 문구로 추정한다
+>   (`_REASON_PATTERNS`). 7.1의 검증 스크립트가 추정이 틀리면 WARN으로 알려준다.
 > - `classify_gesture()` 라벨이 `G1`~`G5` 문자열인지 (`gestures` 테이블 ID와 같아야 함)
 
 ### 7.1 절차
 
 1. **입력 형태 확인** (7.0). AI팀 문서·`encoder.py` docstring과 `to_ai_input()`을 비교한다.
-2. **파일 복사**: `ai_release/`의 `encoder.py`, `features.py`, `model_defs.py`, `weights/`, `preprocess.json`을
-   `backend/ai/`에 복사 (기존 스텁 덮어쓰기). `ai/stub_notice.md`는 삭제.
-   - 실제 `encoder.py`가 `from features import ...`처럼 패키지 밖 import를 쓰면 `from ai.features import ...`로 맞추거나
-     `ai/__init__.py`에서 경로를 잡는다. 가중치 경로가 CWD 기준이면 `Path(__file__).parent` 기준인지 확인.
+2. **파일 복사**: `ai_release/`의 `encoder.py`, `features.py`, `model_defs.py`, `weights/`, `preprocess.json`,
+   `thresholds.json`, `manifest.json`을 `backend/ai/`에 복사한다 (README는 `ai/AI_RELEASE_README.md`로).
+   `ai/__init__.py`는 비워 둔다 (릴리스의 `__init__.py`를 덮어쓰지 말 것 — 상대 import가 꼬인다).
+   `manifest.json`의 sha256으로 파일 무결성을 확인한다.
 3. **의존성 병합**: `ai_release/requirements.txt`의 `torch` 등을 `backend/requirements.txt`에 추가.
    `numpy==1.26.4`가 양쪽에서 같은지 확인. `pip install -r requirements.txt`.
+   (v1.0.0: `torch==2.8.0`. CPU 휠로 충분하다.)
 4. **가중치 확인**: `python ai_release/smoke_test.py`
 5. **계약 검증**: `python scripts/verify_ai_release.py`
    - 시그니처, 임베딩 `(128,)` `float32`, L2 norm=1, 결정성, `embed_batch` 일치, 분류 라벨, 거절 조건 6종.
    - `FAIL`이 있으면 종료 코드 1. `embed`부터 줄줄이 실패하면 7.0의 입력 형태가 다른 것이다.
    - `[WARN] 사유 코드 ...`가 뜨면 `_REASON_PATTERNS` 조정.
-6. **threshold 반영**: `ai_release/thresholds.json`의 값을 `app/default_thresholds.json` 형식으로 옮긴다.
+6. **threshold 반영**: `python scripts/import_thresholds.py` (`ai/thresholds.json` → `app/default_thresholds.json`).
+   운영점 이름을 `far_1_percent`→`far1` 식으로 바꾸고 값은 풀 정밀도로 옮긴다.
    서버를 띄우면 새 `MODEL_VERSION`에 대해 threshold 3종이 자동으로 들어간다 (이미 그 버전 행이 있으면 건드리지 않는다).
    파일을 고치기 전에 서버를 먼저 띄웠다면 `thresholds` 테이블에서 새 `model_version` 행을 지우고 재시작한다.
    값은 재색인 후 `GET /admin/thresholds`로 확인 (활성 모델 버전 기준으로 보여준다).
@@ -509,8 +525,9 @@ curl -X POST localhost:8000/admin/threshold -H 'Content-Type: application/json' 
    curl localhost:8000/health        # status=ok
    ```
    재색인 전까지 `/verify`는 503 `model_version_mismatch`다.
-8. **테스트 재실행**: `pytest`. 스텁 전용 테스트(결정적 벡터로 유사도 1.0, 사유 코드 속성)는 실제 모델에서 실패할 수 있다.
-   `tests/test_ai_stub.py`의 시그니처·형태 테스트는 통과해야 한다.
+8. **테스트 재실행**: `pytest`. `tests/test_ai_contract.py`가 AI 모듈 계약(시그니처·형태·거절 조건)을 직접 검사한다.
+   테스트의 유사도 기대값은 합성 좌표 기준이므로, 모델이 바뀌면 `tests/test_threshold.py`의
+   `UNRELATED_SEED`처럼 두 운영점 사이에 오도록 고른 값은 다시 골라야 할 수 있다.
 
 ### 7.2 재색인 동작
 
@@ -552,11 +569,13 @@ curl -X POST localhost:8000/admin/threshold -H 'Content-Type: application/json' 
 
 **백엔드**
 
-- **스텁 상태**: 바이트 단위로 같은 입력만 유사도 1.0이 나온다. 조금만 달라도 무관한 벡터가 된다.
-  스텁 분류기는 입력 해시로 G1~G5를 고르므로, `USE_GESTURE_CLASSIFIER=true`에서는 스텁이 예측한 제스처로 등록해야 통과한다.
-- **새로운 동작 등록 불가 (true 모드)**: AI팀 제스처 분류기는 G1~G5 닫힌 집합이고 "미분류" 출력이 없다.
-  학습에 없는 동작도 G1~G5 중 하나로 분류된다. 사용자별 자유 동작이 필요하면 `USE_GESTURE_CLASSIFIER=false` + AI팀 검증이 필요하다.
-- **오른손 강제 안 함**: 명세의 거절 조건에 손 방향이 없어 서버는 검사하지 않는다 (`handedness`는 원본에만 남음).
+- **제스처 분류기는 닫힌 집합**: G1~G5만 출력하고 "미분류"가 없다. 학습에 없는 동작도 다섯 개 중 하나로 분류된다.
+  그래서 운영은 `USE_GESTURE_CLASSIFIER=false`(앱의 `gestureId`로 조회)이고 분류 결과는 기록만 한다.
+  개인 제스처를 쓰려면 AI팀의 새 릴리스와 검증이 필요하다 (조회 키는 문자열이라 백엔드 구조 변경은 없다).
+- **등록 정책**: 릴리스 기준 "개인 제스처 1개 × 3회"다 (`enrollmentGestures=1`, `enrollmentTakes=3`).
+- **오른손 전용**: 프레임에 왼손 `handedness`가 있으면 AI 모듈이 거절한다(422 `wrong_hand`).
+  handedness를 보내지 않으면 검사되지 않으므로 앱이 화면에서 강제해야 한다.
+- **테스트 데이터는 합성 좌표**: 테스트의 유사도 값(같은 입력 1.0 등)은 배선 확인용이며 실제 인식 성능이 아니다.
 - **인증 없음**: `/admin/*`, `DELETE /users`에 접근 제어가 없다. 외부에 노출하지 말 것.
 - **인코더 교체 중 인증 중단**: 프로세스에 인코더가 하나라서, 새 인코더를 올린 뒤 재색인이 끝날 때까지 `/verify`는 503이다.
 - **SQLite**: 쓰기 동시성이 하나다 (WAL + busy_timeout 5초). 시연 규모에는 충분하며, 규모가 커지면 `DATABASE_URL`을 Postgres로.
@@ -585,11 +604,12 @@ backend/
 │       ├── reindex_service.py   # 재색인
 │       ├── threshold_service.py
 │       └── app_config_service.py
-├── ai/                          # ⚠️ 스텁. ai_release로 교체
+├── ai/                          # AI팀 릴리스 (encoder/features/model_defs/weights/thresholds)
 ├── alembic/                     # 마이그레이션
 ├── examples/                    # 앱팀 전달용 완전한 요청 예시
 ├── scripts/
 │   ├── seed_demo_data.py
+│   ├── import_thresholds.py     # ai/thresholds.json → app/default_thresholds.json
 │   └── verify_ai_release.py
 └── tests/
 ```

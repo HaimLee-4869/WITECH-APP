@@ -33,6 +33,11 @@ def load_thresholds(
     if exists is not None:
         return 0
     data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("modelVersion") and data["modelVersion"] != model_version:
+        log.warning(
+            "%s는 %s용 값인데 %s에 넣는다. scripts/import_thresholds.py로 갱신했는지 확인할 것.",
+            path.name, data["modelVersion"], model_version,
+        )
     points = data["operatingPoints"]
     for p in points:
         session.add(

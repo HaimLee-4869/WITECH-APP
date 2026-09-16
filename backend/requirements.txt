@@ -1,5 +1,4 @@
 # Sign-ID 백엔드
-# torch 등 AI 의존성은 ai_release 도착 시 병합한다 (README "ai_release 교체 절차").
 fastapi==0.141.1
 uvicorn==0.53.0
 SQLAlchemy==2.0.53
@@ -7,6 +6,9 @@ alembic==1.20.0
 pydantic==2.13.5
 pydantic-settings==2.15.0
 numpy==1.26.4
+
+# AI 모듈 (ai_release/requirements.txt에서 병합, 2026-09-16)
+torch==2.8.0
 
 # 테스트
 pytest==9.1.1

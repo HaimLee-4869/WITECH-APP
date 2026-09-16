@@ -24,7 +24,11 @@ from app.models import Embedding, Enrollment, Gesture, Template, User
 from app.schemas import EnrollRequest, EnrollResponse
 from app.services import app_config_service as cfg
 from app.services import template_service
-from app.services.ai_gateway import invalid_sequence_error, to_ai_input
+from app.services.ai_gateway import (
+    InvalidSequenceError,
+    invalid_sequence_error,
+    to_ai_input,
+)
 from app.timeutil import to_utc_naive
 
 
@@ -40,12 +44,12 @@ def _check_takes(req: EnrollRequest, required: int) -> None:
 def _embed_all(inputs: list[dict], take_nos: list[int]) -> np.ndarray:
     try:
         vectors = encoder.embed_batch(inputs)
-    except encoder.InvalidSequenceError as exc:
+    except InvalidSequenceError as exc:
         # 어느 take가 문제인지 찾아 앱에 알려준다
         for take_no, item in zip(take_nos, inputs):
             try:
                 encoder.embed(item)
-            except encoder.InvalidSequenceError as take_exc:
+            except InvalidSequenceError as take_exc:
                 raise invalid_sequence_error(take_exc, take_no=take_no) from exc
         raise invalid_sequence_error(exc) from exc
     vectors = np.asarray(vectors, dtype=np.float32)

@@ -1,0 +1,193 @@
+{
+  "model_version": "handonly-supcon-v1.0.0",
+  "scheme": "global",
+  "selected_operating_point": "far_1_percent",
+  "enrollment_takes_per_gesture": 3,
+  "enrollment_gestures_per_user": 1,
+  "enrollment_total_takes_per_user": 3,
+  "enrollment_policy": "one_selected_personal_gesture",
+  "selection_data": "known-user cross-session validation only",
+  "operating_points": {
+    "eer": {
+      "threshold": 0.4360462427139282,
+      "validation": {
+        "accuracy": 0.9714285714285714,
+        "balanced_accuracy": 0.9714285714285714,
+        "far": 0.02857142857142857,
+        "frr": 0.02857142857142857
+      },
+      "unseen_analysis": {
+        "accuracy": 0.8273809523809523,
+        "balanced_accuracy": 0.7939189189189189,
+        "far": 0.125,
+        "frr": 0.28716216216216217
+      }
+    },
+    "far_5_percent": {
+      "threshold": 0.27212807536125183,
+      "validation": {
+        "accuracy": 0.9540816326530612,
+        "balanced_accuracy": 0.9642857142857142,
+        "far": 0.05,
+        "frr": 0.02142857142857143
+      },
+      "unseen_analysis": {
+        "accuracy": 0.8005952380952381,
+        "balanced_accuracy": 0.8045665047069541,
+        "far": 0.2050561797752809,
+        "frr": 0.1858108108108108
+      }
+    },
+    "far_1_percent": {
+      "threshold": 0.6275163888931274,
+      "validation": {
+        "accuracy": 0.9857142857142858,
+        "balanced_accuracy": 0.9738095238095239,
+        "far": 0.009523809523809525,
+        "frr": 0.04285714285714286
+      },
+      "unseen_analysis": {
+        "accuracy": 0.8303571428571429,
+        "balanced_accuracy": 0.7614826905557242,
+        "far": 0.07162921348314606,
+        "frr": 0.40540540540540543
+      }
+    }
+  },
+  "scheme_comparison": {
+    "global_eer": {
+      "threshold": 0.4360462427139282,
+      "validation": {
+        "accuracy": 0.9714285714285714,
+        "balanced_accuracy": 0.9714285714285714,
+        "far": 0.02857142857142857,
+        "frr": 0.02857142857142857
+      },
+      "unseen_analysis": {
+        "accuracy": 0.8273809523809523,
+        "balanced_accuracy": 0.7939189189189189,
+        "far": 0.125,
+        "frr": 0.28716216216216217
+      }
+    },
+    "gesture_specific_eer": {
+      "thresholds": {
+        "G1": 0.4698764979839325,
+        "G2": 0.5740048885345459,
+        "G3": 0.27212807536125183,
+        "G4": 0.3222549855709076,
+        "G5": 0.35465919971466064
+      },
+      "validation_by_gesture": {
+        "G1": {
+          "threshold": 0.4698764979839325,
+          "eer": 0.008928571428571428,
+          "accuracy": 0.9846938775510204,
+          "balanced_accuracy": 0.9910714285714286,
+          "far": 0.017857142857142856,
+          "frr": 0.0
+        },
+        "G2": {
+          "threshold": 0.5740048885345459,
+          "eer": 0.02976190476190476,
+          "accuracy": 0.9744897959183674,
+          "balanced_accuracy": 0.9702380952380952,
+          "far": 0.023809523809523808,
+          "frr": 0.03571428571428571
+        },
+        "G3": {
+          "threshold": 0.27212807536125183,
+          "eer": 0.03571428571428571,
+          "accuracy": 0.9642857142857143,
+          "balanced_accuracy": 0.9642857142857143,
+          "far": 0.03571428571428571,
+          "frr": 0.03571428571428571
+        },
+        "G4": {
+          "threshold": 0.3222549855709076,
+          "eer": 0.041666666666666664,
+          "accuracy": 0.9540816326530612,
+          "balanced_accuracy": 0.9583333333333333,
+          "far": 0.047619047619047616,
+          "frr": 0.03571428571428571
+        },
+        "G5": {
+          "threshold": 0.35465919971466064,
+          "eer": 0.03571428571428571,
+          "accuracy": 0.9642857142857143,
+          "balanced_accuracy": 0.9642857142857143,
+          "far": 0.03571428571428571,
+          "frr": 0.03571428571428571
+        }
+      },
+      "validation_combined": {
+        "accuracy": 0.9683673469387755,
+        "balanced_accuracy": 0.9696428571428571,
+        "far": 0.03214285714285714,
+        "frr": 0.02857142857142857
+      },
+      "unseen_analysis_combined": {
+        "accuracy": 0.8194444444444444,
+        "balanced_accuracy": 0.8021181293653203,
+        "far": 0.15589887640449437,
+        "frr": 0.23986486486486486
+      }
+    }
+  },
+  "enrollment_sweep": [
+    {
+      "enrollment_takes": 1,
+      "enrollment_session_policy": "one_session",
+      "validation_threshold_eer": 0.4100639820098877,
+      "validation_eer": 0.02857142857142857,
+      "validation_metrics": {
+        "accuracy": 0.9714285714285714,
+        "balanced_accuracy": 0.9714285714285714,
+        "far": 0.02857142857142857,
+        "frr": 0.02857142857142857
+      },
+      "unseen_metrics": {
+        "accuracy": 0.7331349206349206,
+        "balanced_accuracy": 0.6818061038566656,
+        "far": 0.19382022471910113,
+        "frr": 0.44256756756756754
+      }
+    },
+    {
+      "enrollment_takes": 3,
+      "enrollment_session_policy": "one_session",
+      "validation_threshold_eer": 0.4360462427139282,
+      "validation_eer": 0.02857142857142857,
+      "validation_metrics": {
+        "accuracy": 0.9714285714285714,
+        "balanced_accuracy": 0.9714285714285714,
+        "far": 0.02857142857142857,
+        "frr": 0.02857142857142857
+      },
+      "unseen_metrics": {
+        "accuracy": 0.8273809523809523,
+        "balanced_accuracy": 0.7939189189189189,
+        "far": 0.125,
+        "frr": 0.28716216216216217
+      }
+    },
+    {
+      "enrollment_takes": 4,
+      "enrollment_session_policy": "one_session",
+      "validation_threshold_eer": 0.4223201870918274,
+      "validation_eer": 0.02857142857142857,
+      "validation_metrics": {
+        "accuracy": 0.9714285714285714,
+        "balanced_accuracy": 0.9714285714285714,
+        "far": 0.02857142857142857,
+        "frr": 0.02857142857142857
+      },
+      "unseen_metrics": {
+        "accuracy": 0.8283730158730159,
+        "balanced_accuracy": 0.8035036440935317,
+        "far": 0.13623595505617977,
+        "frr": 0.25675675675675674
+      }
+    }
+  ]
+}

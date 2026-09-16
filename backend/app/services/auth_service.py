@@ -27,7 +27,11 @@ from app.models import AuthLog, User
 from app.schemas import VerifyRequest, VerifyResponse
 from app.services import app_config_service as cfg
 from app.services import template_service, threshold_service
-from app.services.ai_gateway import invalid_sequence_error, to_ai_input
+from app.services.ai_gateway import (
+    InvalidSequenceError,
+    invalid_sequence_error,
+    to_ai_input,
+)
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +120,7 @@ def verify(session: Session, settings: Settings, req: VerifyRequest, raw_body: s
     # 1-2. 검증 겸 제스처 분류 (두 모드 모두 호출해서 기록한다)
     try:
         predicted, confidence = encoder.classify_gesture(ai_input)
-    except encoder.InvalidSequenceError as exc:
+    except InvalidSequenceError as exc:
         fail(INVALID_INPUT)
         _write_log(session, a, active_version, a.latency_ms())
         raise invalid_sequence_error(exc) from exc
@@ -149,7 +153,7 @@ def verify(session: Session, settings: Settings, req: VerifyRequest, raw_body: s
     # 4. query 임베딩
     try:
         query = encoder.embed(ai_input)
-    except encoder.InvalidSequenceError as exc:
+    except InvalidSequenceError as exc:
         fail(INVALID_INPUT)
         _write_log(session, a, active_version, a.latency_ms())
         raise invalid_sequence_error(exc) from exc

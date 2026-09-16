@@ -1,0 +1,72 @@
+{
+  "release": "handonly-supcon-v1.0.0",
+  "gesture_release": "handonly-gesture-1dcnn-v1.0.0",
+  "created": "2026-09-10",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 3319,
+      "sha256": "172a6b262113b300b6f25be7dc95d0ecca3b50ed1079b7f708954dde4ea137a3"
+    },
+    {
+      "path": "__init__.py",
+      "bytes": 366,
+      "sha256": "967070a53811e0fe84d89a81a7d647999454ca9f1e49a3a98ac55f8ba9ab1d20"
+    },
+    {
+      "path": "calibration_report.md",
+      "bytes": 1166,
+      "sha256": "f076c8f9e40dc4f5564f961db5eba129345f70ad9fc25369ffdf20f678d65ac7"
+    },
+    {
+      "path": "cpu_benchmark.json",
+      "bytes": 603,
+      "sha256": "135a1d17371f239aae823451ef4554226738cbc08ad800a0c255aeeee1d88d6f"
+    },
+    {
+      "path": "encoder.py",
+      "bytes": 5089,
+      "sha256": "8a70c18124176a0b6ea685738bdd45b592487c51a1fc9fa5556524ff4a935059"
+    },
+    {
+      "path": "features.py",
+      "bytes": 7124,
+      "sha256": "f88302a7ab31d6c484cb99ac7c6242e7102087edf7cfaa4135561512a9f4946b"
+    },
+    {
+      "path": "model_defs.py",
+      "bytes": 3396,
+      "sha256": "dceea699fefb496aed43c5c32fc61b2c4cc72b9255b86a29666a0dc2599f8504"
+    },
+    {
+      "path": "preprocess.json",
+      "bytes": 14050,
+      "sha256": "26f01dde01500fb8afe72ceda243eaeda125f46f3b86954ed7ce355f918615e8"
+    },
+    {
+      "path": "requirements.txt",
+      "bytes": 27,
+      "sha256": "06fafc21fa0dca1019c94c341f0cdc33373034748db93a8fd9666eb9a260e733"
+    },
+    {
+      "path": "smoke_test.py",
+      "bytes": 1351,
+      "sha256": "d7f3d3489b297f2cb188839ec103d1e582b84c51d04d617deba88f7a5f090b3f"
+    },
+    {
+      "path": "thresholds.json",
+      "bytes": 5859,
+      "sha256": "beccfa2402328cf8ecb45ca7e13a859c35e12a7884eb09a416b785dff4d01ab2"
+    },
+    {
+      "path": "weights/auth_handonly_supcon_v1.pt",
+      "bytes": 515107,
+      "sha256": "c40551375f05b5fe23af8ae52e27480c69e684726e3c2665e63cf34fb2b3a699"
+    },
+    {
+      "path": "weights/gesture_handonly_1dcnn_v1.pt",
+      "bytes": 470854,
+      "sha256": "995cb77b632b6047c4c6a18d0fb65d0affe1c57c674bda9a615bcb4b277ad620"
+    }
+  ]
+}

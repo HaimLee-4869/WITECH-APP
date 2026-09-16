@@ -22,8 +22,9 @@ def _count(db, model):
 
 
 def _expected_vectors(body):
+    """백엔드와 같은 경로로 다시 계산한 등록 임베딩."""
     req = schemas.EnrollRequest.model_validate(body)
-    return np.stack([encoder.embed(to_ai_input(req.camera, t.frames)) for t in req.takes])
+    return encoder.embed_batch([to_ai_input(req.camera, t.frames) for t in req.takes])
 
 
 # --- centroid 재정규화 --------------------------------------------------------------
@@ -107,7 +108,8 @@ def test_enroll_template_is_renormalized_centroid(client, db, make_user):
     assert tpl.take_count == 3 and tpl.model_version == encoder.MODEL_VERSION
     for emb, vec in zip(stored_embeddings, vectors):
         assert emb.model_version == encoder.MODEL_VERSION
-        assert np.array_equal(template_service.from_blob(emb.vector), vec)
+        # 배치 forward와 단건 forward는 마지막 자리에서 미세하게 다를 수 있다
+        assert np.allclose(template_service.from_blob(emb.vector), vec, atol=1e-6)
 
 
 def test_reenroll_replaces_existing(client, db, make_user):

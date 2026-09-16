@@ -12,7 +12,9 @@ from app import models
 from app.routers import logs as logs_router
 from app.services import app_config_service as cfg
 from tests.conftest import post_json
-from tests.payloads import enroll_same_body, stub_prediction, verify_body
+from tests.payloads import enroll_same_body, verify_body
+
+GESTURE = "G3"
 
 
 # --- /config --------------------------------------------------------------------
@@ -58,17 +60,16 @@ def test_create_user_conflict_and_validation(client):
 
 def test_users_show_enrolled_gestures(client):
     client.post("/users", json={"id": "kim", "name": "김길동"})
-    gesture = stub_prediction(0)
-    post_json(client, "/enroll", enroll_same_body(gesture_id=gesture))
-    assert client.get("/users").json()[0]["enrolledGestures"] == [gesture]
+    post_json(client, "/enroll", enroll_same_body(gesture_id=GESTURE))
+    assert client.get("/users").json()[0]["enrolledGestures"] == [GESTURE]
 
 
 def test_delete_user_removes_everything(client, db):
     client.post("/users", json={"id": "kim", "name": "김길동"})
     client.post("/users", json={"id": "lee", "name": "이길동"})
     for uid in ("kim", "lee"):
-        post_json(client, "/enroll", enroll_same_body(user_id=uid, gesture_id=stub_prediction(0)))
-        post_json(client, "/verify", verify_body(user_id=uid))
+        post_json(client, "/enroll", enroll_same_body(user_id=uid, gesture_id=GESTURE))
+        post_json(client, "/verify", verify_body(user_id=uid, gesture_id=GESTURE))
 
     assert client.delete("/users/kim").status_code == 204
     with db.session() as s:
@@ -85,11 +86,11 @@ def test_delete_user_removes_everything(client, db):
 def some_logs(client):
     client.post("/users", json={"id": "kim", "name": "김길동", "department": "개발팀"})
     client.post("/users", json={"id": "lee", "name": "이길동", "department": "인사팀"})
-    post_json(client, "/enroll", enroll_same_body(gesture_id=stub_prediction(0)))
+    post_json(client, "/enroll", enroll_same_body(gesture_id=GESTURE))
     for _ in range(3):
-        post_json(client, "/verify", verify_body("kim", 0))   # 통과
+        post_json(client, "/verify", verify_body("kim", 0, gesture_id=GESTURE))   # 통과
     for seed in (1, 2):
-        post_json(client, "/verify", verify_body("lee", seed))  # no_template
+        post_json(client, "/verify", verify_body("lee", seed, gesture_id=GESTURE))  # no_template
 
 
 def test_logs_page(client, some_logs):
@@ -160,9 +161,9 @@ def test_health(client):
         "modelVersion": encoder.MODEL_VERSION,
         "loadedModelVersion": encoder.MODEL_VERSION,
         "gestureModelVersion": encoder.GESTURE_MODEL_VERSION,
-        "activeThreshold": 0.627516,
+        "activeThreshold": 0.6275163888931274,
         "activeThresholdBasis": "far1",
-        "useGestureClassifier": True,
+        "useGestureClassifier": False,  # 운영 설정
         "dbOk": True,
     }
 

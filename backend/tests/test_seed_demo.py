@@ -46,7 +46,7 @@ def test_seeded_admin_api(settings, monkeypatch):
         assert sum(s["total"] for s in stats) == result["logs"]
 
         health = c.get("/health").json()
-        assert health["status"] == "ok" and health["activeThreshold"] == 0.627516
+        assert health["status"] == "ok" and health["activeThreshold"] == 0.6275163888931274
 
 
 def test_seed_is_idempotent_and_reset(settings):

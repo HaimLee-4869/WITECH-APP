@@ -1,10 +1,29 @@
 {
-  "source": "AI팀 thresholds.json (2026-09-10 확정, handonly-supcon-v1.0.0). 명세 2장.",
+  "source": "ai_release/thresholds.json (handonly-supcon-v1.0.0), scheme=global, 선택 운영점=far_1_percent",
+  "modelVersion": "handonly-supcon-v1.0.0",
   "scheme": "global",
   "defaultBasis": "far1",
   "operatingPoints": [
-    { "basis": "far1", "value": 0.627516, "far": 0.0095, "frr": 0.0429 },
-    { "basis": "eer",  "value": 0.436046, "far": 0.0286, "frr": 0.0286 },
-    { "basis": "far5", "value": 0.272128, "far": 0.0500, "frr": 0.0214 }
+    {
+      "basis": "far1",
+      "value": 0.6275163888931274,
+      "far": 0.009523809523809525,
+      "frr": 0.04285714285714286,
+      "releaseName": "far_1_percent"
+    },
+    {
+      "basis": "eer",
+      "value": 0.4360462427139282,
+      "far": 0.02857142857142857,
+      "frr": 0.02857142857142857,
+      "releaseName": "eer"
+    },
+    {
+      "basis": "far5",
+      "value": 0.27212807536125183,
+      "far": 0.05,
+      "frr": 0.02142857142857143,
+      "releaseName": "far_5_percent"
+    }
   ]
 }

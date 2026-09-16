@@ -2,15 +2,16 @@ from app.config import Settings
 
 
 def test_settings_defaults(monkeypatch):
+    """기본값은 운영 설정(2026-09-16 팀 결정): gestureId로 템플릿 조회."""
     monkeypatch.delenv("USE_GESTURE_CLASSIFIER", raising=False)
     s = Settings(_env_file=None)
-    assert s.use_gesture_classifier is True
+    assert s.use_gesture_classifier is False
     assert s.ai_device == "cpu"
 
 
 def test_use_gesture_classifier_from_env(monkeypatch):
-    monkeypatch.setenv("USE_GESTURE_CLASSIFIER", "false")
-    assert Settings(_env_file=None).use_gesture_classifier is False
+    monkeypatch.setenv("USE_GESTURE_CLASSIFIER", "true")
+    assert Settings(_env_file=None).use_gesture_classifier is True
 
 
 def test_cors_origin_list():
@@ -54,7 +55,9 @@ def test_startup_seeds_gestures_thresholds_config(client):
         assert s.scalars(select(models.Gesture.id)).all() == ["G1", "G2", "G3", "G4", "G5"]
         rows = s.scalars(select(models.Threshold)).all()
         assert {(r.basis, r.value, r.is_active) for r in rows} == {
-            ("far1", 0.627516, True), ("eer", 0.436046, False), ("far5", 0.272128, False),
+            ("far1", 0.6275163888931274, True),
+            ("eer", 0.4360462427139282, False),
+            ("far5", 0.27212807536125183, False),
         }
         assert all(r.scheme == "global" and r.gesture_id is None for r in rows)
         assert cfg.get_active_model_version(s) == encoder.MODEL_VERSION

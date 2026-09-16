@@ -1,6 +1,6 @@
 """재색인과 실패 시 롤백 (명세 7장, 10장).
 
-인코더 교체는 encoder.MODEL_VERSION과 벡터 생성 방식을 바꿔서 흉내 낸다.
+인코더 교체(다음 릴리스)는 encoder.MODEL_VERSION과 벡터 생성 방식을 바꿔서 흉내 낸다.
 """
 
 from __future__ import annotations
@@ -19,9 +19,10 @@ from app.schemas import SequencePayload
 from app.services import template_service
 from app.services.ai_gateway import to_ai_input
 from tests.conftest import post_json
-from tests.payloads import enroll_body, enroll_same_body, stub_prediction, verify_body
+from tests.payloads import enroll_body, enroll_same_body, verify_body
 
-OLD, NEW = encoder.MODEL_VERSION, "stub-v1"
+OLD, NEW = encoder.MODEL_VERSION, "handonly-supcon-v1.1.0"
+GESTURE, SECOND_GESTURE = "G3", "G5"
 
 
 def _swap_encoder(monkeypatch, fail_on=None):
@@ -31,29 +32,40 @@ def _swap_encoder(monkeypatch, fail_on=None):
     """
     rotation = np.linalg.qr(np.random.default_rng(99).normal(size=(128, 128)))[0].astype(np.float32)
     original_embed = encoder.embed
+    original_batch = encoder.embed_batch
+
+    def rotate(vectors):
+        out = np.atleast_2d(vectors) @ rotation.T
+        out /= np.linalg.norm(out, axis=1, keepdims=True)
+        return out.astype(np.float32)
+
+    def check(payload):
+        if fail_on is not None and payload.get("width") == fail_on:
+            raise RuntimeError("weights corrupted")
 
     def new_embed(frames):
-        if fail_on is not None and frames["camera"]["width"] == fail_on:
-            raise RuntimeError("weights corrupted")
-        v = rotation @ original_embed(frames)
-        return (v / np.linalg.norm(v)).astype(np.float32)
+        check(frames)
+        return rotate(original_embed(frames))[0]
+
+    def new_embed_batch(list_of_frames):
+        for payload in list_of_frames:
+            check(payload)
+        result = original_batch(list_of_frames)
+        return rotate(result) if len(result) else result
 
     monkeypatch.setattr(encoder, "MODEL_VERSION", NEW)
-    monkeypatch.setattr(encoder, "embed", new_embed)  # embed_batch도 이걸 거친다
-
-
-def _second_gesture() -> str:
-    return "G5" if stub_prediction(0) != "G5" else "G4"
+    # 실제 모듈의 embed_batch는 embed를 호출하지 않으므로 둘 다 바꾼다
+    monkeypatch.setattr(encoder, "embed", new_embed)
+    monkeypatch.setattr(encoder, "embed_batch", new_embed_batch)
 
 
 def _enroll_users(client):
-    gesture = stub_prediction(0)
     for uid in ("kim", "lee", "oh"):
         client.post("/users", json={"id": uid, "name": uid})
-        assert post_json(client, "/enroll", enroll_same_body(uid, gesture, 0)).status_code == 200
-    body = enroll_body("kim", _second_gesture(), seeds=(3, 4, 5))
+        assert post_json(client, "/enroll", enroll_same_body(uid, GESTURE, 0)).status_code == 200
+    body = enroll_body("kim", SECOND_GESTURE, seeds=(3, 4, 5))
     assert post_json(client, "/enroll", body).status_code == 200
-    return gesture  # 템플릿 4개, enrollments 12개
+    return GESTURE  # 템플릿 4개, enrollments 12개
 
 
 def _snapshot(db):
@@ -87,7 +99,7 @@ def test_reindex_updates_all_templates(settings, monkeypatch):
     with _restart(settings) as c:
         db = c.app.state.db
         assert c.get("/health").json()["status"] == "degraded"
-        assert post_json(c, "/verify", verify_body("kim", 0)).status_code == 503  # 교체 직후엔 비교 거부
+        assert post_json(c, "/verify", verify_body("kim", 0, gesture_id=GESTURE)).status_code == 503
 
         res = c.post("/admin/reindex", json={"modelVersion": NEW, "dryRun": False})
         assert res.status_code == 200, res.text
@@ -110,7 +122,7 @@ def test_reindex_updates_all_templates(settings, monkeypatch):
         health = c.get("/health").json()
         assert health["status"] == "ok" and health["modelVersion"] == NEW
 
-        res = post_json(c, "/verify", verify_body("kim", 0)).json()
+        res = post_json(c, "/verify", verify_body("kim", 0, gesture_id=GESTURE)).json()
         assert res["passed"] is True and res["score"] == pytest.approx(1.0, abs=1e-5)
         assert res["modelVersion"] == NEW
         assert c.get("/logs").json()["items"][0]["authModelVersion"] == NEW
@@ -125,11 +137,11 @@ def test_reindex_new_centroid_matches_new_space(settings, monkeypatch):
     with _restart(settings) as c:
         c.post("/admin/reindex", json={"modelVersion": NEW})
         with c.app.state.db.session() as s:
-            old = template_service.get_template(s, "kim", _second_gesture(), OLD)
-            new = template_service.get_template(s, "kim", _second_gesture(), NEW)
+            old = template_service.get_template(s, "kim", SECOND_GESTURE, OLD)
+            new = template_service.get_template(s, "kim", SECOND_GESTURE, NEW)
             group = s.scalars(
                 select(models.Enrollment)
-                .where(models.Enrollment.user_id == "kim", models.Enrollment.gesture_id == _second_gesture())
+                .where(models.Enrollment.user_id == "kim", models.Enrollment.gesture_id == SECOND_GESTURE)
                 .order_by(models.Enrollment.take_no)
             ).all()
         inputs = []
@@ -148,7 +160,7 @@ def test_reindex_failure_keeps_old_version(settings, monkeypatch):
         with c.app.state.db.session() as s:
             for e in s.scalars(select(models.Enrollment).where(models.Enrollment.user_id == "oh")):
                 payload = json.loads(e.landmarks_json)
-                payload["camera"]["width"] = 721
+                payload["camera"]["width"] = 721  # _swap_encoder(fail_on=721)이 이 입력에서 실패한다
                 e.landmarks_json = json.dumps(payload)
             s.commit()
         before = _snapshot(c.app.state.db)
@@ -187,8 +199,8 @@ def test_failed_same_version_reindex_keeps_auth_working(client, db, monkeypatch)
     monkeypatch.undo()
 
     assert _snapshot(db) == before
-    verify = post_json(client, "/verify", verify_body("kim", 0)).json()
-    assert verify["passed"] is True and verify["predictedGesture"] == gesture
+    verify = post_json(client, "/verify", verify_body("kim", 0, gesture_id=GESTURE)).json()
+    assert verify["passed"] is True and verify["gestureId"] == gesture
 
 
 def test_corrupted_stored_payload_is_reported(client, db):

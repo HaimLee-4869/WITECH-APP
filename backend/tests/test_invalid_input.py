@@ -6,7 +6,7 @@ import pytest
 
 from app.services.ai_gateway import REASON_MESSAGES, reason_of
 from tests.conftest import post_json
-from tests.payloads import enroll_body, make_frames
+from tests.payloads import enroll_body, left_hand, make_frames
 
 
 def _no_hand(frames, count):
@@ -46,6 +46,8 @@ CASES = [
     ("malformed_landmarks", lambda: _short_landmarks(make_frames(0)), None),
     ("malformed_landmarks", lambda: _nan(make_frames(0)), None),
     ("malformed_landmarks", lambda: _inf(make_frames(0)), None),
+    # 명세 1장에는 없지만 hand-only 모델이 거절한다 (앱은 오른손 안내를 띄운다)
+    ("wrong_hand", lambda: left_hand(make_frames(0)), None),
 ]
 IDS = [f"{reason}-{i}" for i, (reason, _, _) in enumerate(CASES)]
 
@@ -105,7 +107,7 @@ def test_verify_rejections_are_422_and_logged(client, make_user, reason, frames,
     from tests.payloads import verify_body
 
     make_user()
-    body = verify_body()
+    body = verify_body(gesture_id="G1")  # 운영 모드에서는 gestureId가 필수
     body["frames"] = frames()
     _apply_camera(body, cam)
     res = post_json(client, "/verify", body)

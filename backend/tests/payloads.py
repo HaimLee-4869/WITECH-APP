@@ -56,8 +56,15 @@ def enroll_body(user_id: str = "kim", gesture_id: str = "G1", seeds=(0, 1, 2)) -
 
 
 def ai_input(frames: list[dict], cam: dict | None = None) -> dict:
-    """AI 모듈에 직접 넘길 형태 (단위 테스트용)."""
-    return {"camera": copy.deepcopy(cam if cam is not None else camera()), "frames": copy.deepcopy(frames)}
+    """AI 모듈에 직접 넘길 payload. 백엔드와 같은 변환 경로를 쓴다."""
+    from app import schemas
+    from app.services.ai_gateway import to_ai_input
+
+    cam = camera() if cam is None else cam
+    return to_ai_input(
+        None if cam is None else schemas.Camera.model_validate(cam),
+        [schemas.Frame.model_validate(f) for f in copy.deepcopy(frames)],
+    )
 
 
 def enroll_same_body(user_id: str = "kim", gesture_id: str = "G1", seed: int = 0) -> dict:
@@ -65,14 +72,21 @@ def enroll_same_body(user_id: str = "kim", gesture_id: str = "G1", seed: int = 0
     return enroll_body(user_id, gesture_id, seeds=(seed, seed, seed))
 
 
-def stub_prediction(seed: int = 0) -> str:
-    """verify_body(seed=seed)에 대해 AI 모듈이 예측하는 제스처."""
+def predicted_gesture(seed: int = 0) -> str:
+    """verify_body(seed=seed)에 대해 제스처 모델이 예측하는 제스처.
+
+    USE_GESTURE_CLASSIFIER=true 모드 테스트에서만 필요하다.
+    """
     from ai import encoder
     from app import schemas
     from app.services.ai_gateway import to_ai_input
 
     req = schemas.VerifyRequest.model_validate(verify_body(seed=seed))
     return encoder.classify_gesture(to_ai_input(req.camera, req.frames))[0]
+
+
+def left_hand(frames: list[dict]) -> list[dict]:
+    return [{**f, "handedness": "Left"} for f in frames]
 
 
 def other_gesture(gesture_id: str) -> str:

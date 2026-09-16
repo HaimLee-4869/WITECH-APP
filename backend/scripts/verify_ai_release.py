@@ -4,7 +4,7 @@
     python scripts/verify_ai_release.py
 
 backend/ai/encoder.py가 명세 1장 계약과 맞는지 확인한다. 하나라도 FAIL이면 종료 코드 1.
-스텁 상태에서도 전부 PASS여야 한다 (MODEL_VERSION이 stub이라는 WARN만 뜬다).
+MODEL_VERSION에 stub이 들어 있으면 아직 교체 전이라는 WARN이 뜬다.
 
 입력은 백엔드가 실제로 넘기는 형태(app/services/ai_gateway.to_ai_input)로 만든다.
 embed 단계부터 줄줄이 실패하면 **입력 형태 가정이 실제 모듈과 다른 것**이다.
@@ -26,7 +26,12 @@ sys.path.insert(0, str(BACKEND_DIR))
 import numpy as np  # noqa: E402
 
 from app.schemas import Camera, Frame  # noqa: E402
-from app.services.ai_gateway import REASON_MESSAGES, reason_of, to_ai_input  # noqa: E402
+from app.services.ai_gateway import (  # noqa: E402
+    REASON_MESSAGES,
+    InvalidSequenceError,
+    reason_of,
+    to_ai_input,
+)
 
 EXPECTED_DIM = 128
 GESTURES = {f"G{i}" for i in range(1, 6)}
@@ -92,12 +97,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- 1. 공개 API ---
     def api():
-        for name in ("MODEL_VERSION", "GESTURE_MODEL_VERSION", "InvalidSequenceError",
+        for name in ("MODEL_VERSION", "GESTURE_MODEL_VERSION",
                      "load_model", "embed", "embed_batch", "classify_gesture"):
             assert hasattr(encoder, name), f"{name} 없음"
         assert isinstance(encoder.MODEL_VERSION, str) and encoder.MODEL_VERSION
         assert isinstance(encoder.GESTURE_MODEL_VERSION, str) and encoder.GESTURE_MODEL_VERSION
-        assert issubclass(encoder.InvalidSequenceError, ValueError), "InvalidSequenceError는 ValueError 하위여야 함"
+        # InvalidSequenceError는 encoder 또는 features 어디에 있어도 된다 (백엔드는 게이트웨이로 받는다)
+        assert issubclass(InvalidSequenceError, ValueError), "InvalidSequenceError는 ValueError 하위여야 함"
         params = inspect.signature(encoder.load_model).parameters
         assert "device" in params, "load_model(device=...) 인자 없음"
         return f"MODEL_VERSION={encoder.MODEL_VERSION}, GESTURE_MODEL_VERSION={encoder.GESTURE_MODEL_VERSION}"
@@ -175,6 +181,9 @@ def main(argv: list[str] | None = None) -> int:
         frames[3]["lm"][0][0] = float("nan")
         return frames
 
+    def left(frames):
+        return [{**f, "handedness": "Left"} for f in frames]
+
     cases = [
         ("too_few_frames", lambda: build(make_frames(3, n=7))),
         ("insufficient_valid_frames", lambda: build(no_hand(make_frames(3, n=12), 5))),
@@ -183,12 +192,14 @@ def main(argv: list[str] | None = None) -> int:
         ("missing_camera_size", lambda: build(make_frames(3), camera={"width": 720})),
         ("malformed_landmarks", lambda: build(bad_shape(make_frames(3)))),
         ("malformed_landmarks", lambda: build(nan(make_frames(3)))),
+        # 명세 1장에는 없지만 hand-only 모델이 거절한다. 앱 안내 문구가 갈린다.
+        ("wrong_hand", lambda: build(left(make_frames(3)))),
     ]
     for expected, make in cases:
         def rejection(expected=expected, make=make):
             try:
                 encoder.embed(make())
-            except encoder.InvalidSequenceError as exc:
+            except InvalidSequenceError as exc:
                 got = reason_of(exc)
                 if got != expected:
                     r.add("WARN", f"사유 코드 {expected}",
