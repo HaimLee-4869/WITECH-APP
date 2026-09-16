@@ -1,138 +1,200 @@
-"""Stable import surface for WITECH FastAPI integration."""
+"""Stable FastAPI integration surface for WITECK Shared Dual-Head."""
 
 from __future__ import annotations
 
 import json
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 import torch
 
 try:
-    from .features import build_hand_features
-    from .model_defs import GestureEmbedding1DCNN, HandOnlySupCon1DCNN
-except ImportError:  # Allows ``import encoder`` when ai_release is on sys.path.
-    from features import build_hand_features
-    from model_defs import GestureEmbedding1DCNN, HandOnlySupCon1DCNN
+    from .features import InvalidSequenceError, build_hand_features
+    from .model_defs import SharedDualHead1DCNN
+except ImportError:
+    from features import InvalidSequenceError, build_hand_features
+    from model_defs import SharedDualHead1DCNN
 
 
-MODEL_VERSION = "handonly-supcon-v1.0.0"
-GESTURE_MODEL_VERSION = "handonly-gesture-1dcnn-v1.0.0"
+MODEL_VERSION = "shared-dual-head-v1.1.0"
 EMBEDDING_DIM = 128
 
 _ROOT = Path(__file__).resolve().parent
-_AUTH_PATH = _ROOT / "weights" / "auth_handonly_supcon_v1.pt"
-_GESTURE_PATH = _ROOT / "weights" / "gesture_handonly_1dcnn_v1.pt"
+_MODEL_PATH = _ROOT / "weights" / "shared_dual_head_v1.pt"
+_PREPROCESS_PATH = _ROOT / "preprocess.json"
+_THRESHOLDS_PATH = _ROOT / "thresholds.json"
+
 _STATE_LOCK = threading.RLock()
-_AUTH_MODEL = None
-_GESTURE_MODEL = None
-_AUTH_CKPT = None
-_GESTURE_CKPT = None
+_MODEL = None
+_CKPT = None
+_DEVICE = None
+_PREPROCESS = None
+_THRESHOLDS = None
 
 
-def _construct_models(device: torch.device):
-    auth_ckpt = torch.load(_AUTH_PATH, map_location=device, weights_only=False)
-    gesture_ckpt = torch.load(_GESTURE_PATH, map_location=device, weights_only=False)
-    if int(auth_ckpt["input_dim"]) != 127 or int(gesture_ckpt["input_dim"]) != 127:
-        raise RuntimeError("release weights do not match the D=127 feature contract")
+def _load_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
 
-    auth_model = HandOnlySupCon1DCNN(
-        input_dim=auth_ckpt["input_dim"],
-        num_classes=auth_ckpt["num_classes"],
-        embedding_dim=auth_ckpt["embedding_dim"],
+
+def _construct_model(device: torch.device):
+    ckpt = torch.load(_MODEL_PATH, map_location=device, weights_only=False)
+    if int(ckpt["input_dim"]) != 127:
+        raise RuntimeError("release weight does not match the D=127 feature contract")
+
+    train_users = ckpt.get("train_users")
+    if train_users is not None:
+        num_user_classes = len(train_users)
+    else:
+        # Fallback for checkpoints that explicitly saved num_user_classes.
+        num_user_classes = int(ckpt["num_user_classes"])
+
+    model = SharedDualHead1DCNN(
+        input_dim=int(ckpt["input_dim"]),
+        num_user_classes=num_user_classes,
+        embedding_dim=int(ckpt["embedding_dim"]),
     )
-    gesture_model = GestureEmbedding1DCNN(
-        input_dim=gesture_ckpt["input_dim"],
-        num_classes=gesture_ckpt["num_classes"],
-        embedding_dim=gesture_ckpt["embedding_dim"],
-    )
-    auth_model.load_state_dict(auth_ckpt["model_state_dict"])
-    gesture_model.load_state_dict(gesture_ckpt["model_state_dict"])
-    return auth_model.to(device).eval(), gesture_model.to(device).eval(), auth_ckpt, gesture_ckpt
+    model.load_state_dict(ckpt["model_state_dict"], strict=True)
+    return model.to(device).eval(), ckpt
 
 
 def load_model(device: str = "cpu"):
-    """Load both models once during server startup; repeated calls are harmless."""
+    """Load the Dual-Head model once. Repeated calls are harmless and thread-safe."""
 
-    global _AUTH_MODEL, _GESTURE_MODEL, _AUTH_CKPT, _GESTURE_CKPT
+    global _MODEL, _CKPT, _DEVICE, _PREPROCESS, _THRESHOLDS
     requested_device = torch.device(device)
+
     with _STATE_LOCK:
-        if _AUTH_MODEL is None:
-            _AUTH_MODEL, _GESTURE_MODEL, _AUTH_CKPT, _GESTURE_CKPT = _construct_models(
-                requested_device
-            )
+        if _MODEL is None:
+            if not _MODEL_PATH.exists():
+                raise FileNotFoundError(
+                    f"Missing release weight: {_MODEL_PATH}. "
+                    "Run finalize_release.py with the trained checkpoint first."
+                )
+            _MODEL, _CKPT = _construct_model(requested_device)
+            _DEVICE = requested_device
+            _PREPROCESS = _load_json(_PREPROCESS_PATH)
+            _THRESHOLDS = _load_json(_THRESHOLDS_PATH)
+
     return {
         "model_version": MODEL_VERSION,
-        "gesture_model_version": GESTURE_MODEL_VERSION,
-        "device": str(next(_AUTH_MODEL.parameters()).device),
+        "device": str(next(_MODEL.parameters()).device),
+        "embedding_dim": EMBEDDING_DIM,
     }
 
 
 def _ensure_loaded():
-    if _AUTH_MODEL is None:
+    if _MODEL is None:
         load_model("cpu")
 
 
-def _normalize(features: np.ndarray, duration: np.ndarray, checkpoint: dict):
-    mean = np.asarray(checkpoint["sequence_mean"], dtype=np.float32)
-    std = np.asarray(checkpoint["sequence_std"], dtype=np.float32)
-    x = (features - mean) / std
-    d = (duration - float(checkpoint["duration_mean"])) / float(checkpoint["duration_std"])
-    return x.astype(np.float32), d.astype(np.float32)
+def _normalization():
+    if _PREPROCESS is None:
+        _ensure_loaded()
+    section = _PREPROCESS["dual_head"]
+    mean = np.asarray(section["sequence_mean"], dtype=np.float32)
+    std = np.asarray(section["sequence_std"], dtype=np.float32)
+    duration_mean = float(section["duration_mean"])
+    duration_std = float(section["duration_std"])
+    return mean, std, duration_mean, duration_std
 
 
-def _prepare_one(frames: Any):
-    features, duration = build_hand_features(frames, require_right_hand=True)
-    return features, duration
+def _normalize(features: np.ndarray, durations: np.ndarray):
+    mean, std, duration_mean, duration_std = _normalization()
+    features = (features - mean) / np.maximum(std, 1e-8)
+    durations = (durations - duration_mean) / max(duration_std, 1e-8)
+    return features.astype(np.float32), durations.astype(np.float32)
 
 
-def _auth_forward(features: np.ndarray, durations: np.ndarray) -> np.ndarray:
+def _prepare_one(payload: Any):
+    features, duration = build_hand_features(payload)
+    return features, np.float32(duration)
+
+
+def _prepare_batch(payloads: Sequence[Any]):
+    if not isinstance(payloads, Sequence) or isinstance(payloads, (str, bytes)):
+        raise InvalidSequenceError("payloads must be a sequence")
+    if len(payloads) == 0:
+        raise InvalidSequenceError("payloads must not be empty")
+
+    built = [_prepare_one(payload) for payload in payloads]
+    features = np.stack([item[0] for item in built], axis=0)
+    durations = np.asarray([item[1] for item in built], dtype=np.float32)
+    return features, durations
+
+
+@torch.inference_mode()
+def _forward_batch(payloads: Sequence[Any]):
     _ensure_loaded()
-    x, d = _normalize(features, durations, _AUTH_CKPT)
-    with _STATE_LOCK, torch.inference_mode():
-        embedding, _ = _AUTH_MODEL(torch.from_numpy(x), torch.from_numpy(d))
-    output = embedding.cpu().numpy().astype(np.float32)
-    output /= np.maximum(np.linalg.norm(output, axis=1, keepdims=True), 1e-12)
-    return output
+    features, durations = _prepare_batch(payloads)
+    features, durations = _normalize(features, durations)
 
+    xb = torch.from_numpy(features).to(_DEVICE)
+    db = torch.from_numpy(durations).to(_DEVICE)
 
-def embed(frames) -> np.ndarray:
-    """Return one L2-normalized authentication embedding with shape ``[128]``."""
+    # Preserve the previous release's concurrency contract:
+    # backend code does NOT need to add a separate model-forward lock.
+    with _STATE_LOCK:
+        gesture, user = _MODEL(xb, db)
 
-    features, duration = _prepare_one(frames)
-    return _auth_forward(features[None, ...], np.asarray([duration], np.float32))[0]
-
-
-def embed_batch(list_of_frames) -> np.ndarray:
-    """Return L2-normalized embeddings with shape ``[N,128]``."""
-
-    prepared = [_prepare_one(frames) for frames in list_of_frames]
-    if not prepared:
-        return np.empty((0, EMBEDDING_DIM), dtype=np.float32)
-    features = np.stack([item[0] for item in prepared])
-    durations = np.asarray([item[1] for item in prepared], dtype=np.float32)
-    return _auth_forward(features, durations)
-
-
-def classify_gesture(frames) -> tuple[str, float]:
-    """Return ``(gesture_id, softmax_confidence)`` for one capture."""
-
-    _ensure_loaded()
-    features, duration = _prepare_one(frames)
-    x, d = _normalize(
-        features[None, ...], np.asarray([duration], np.float32), _GESTURE_CKPT
+    return (
+        gesture.detach().cpu().numpy().astype(np.float32, copy=False),
+        user.detach().cpu().numpy().astype(np.float32, copy=False),
     )
-    with _STATE_LOCK, torch.inference_mode():
-        _, logits = _GESTURE_MODEL(torch.from_numpy(x), torch.from_numpy(d))
-        probabilities = torch.softmax(logits, dim=1)[0]
-    index = int(probabilities.argmax().item())
-    return str(_GESTURE_CKPT["classes"][index]), float(probabilities[index].item())
 
 
-def release_metadata() -> dict:
-    """Expose version and preprocessing information for health/config endpoints."""
+def embed_gesture(payload: Any) -> np.ndarray:
+    """Return one L2-normalized 128-D gesture embedding from raw landmark payload."""
+    gesture, _ = _forward_batch([payload])
+    return gesture[0]
 
-    with (_ROOT / "preprocess.json").open(encoding="utf-8") as handle:
-        return json.load(handle)
+
+def embed_user(payload: Any) -> np.ndarray:
+    """Return one L2-normalized 128-D user embedding from raw landmark payload."""
+    _, user = _forward_batch([payload])
+    return user[0]
+
+
+def embed_gesture_batch(payloads: Sequence[Any]) -> np.ndarray:
+    """Return [N,128] L2-normalized gesture embeddings."""
+    gesture, _ = _forward_batch(payloads)
+    return gesture
+
+
+def embed_user_batch(payloads: Sequence[Any]) -> np.ndarray:
+    """Return [N,128] L2-normalized user embeddings."""
+    _, user = _forward_batch(payloads)
+    return user
+
+
+def embed_both(payload: Any):
+    """Efficiently compute both embeddings with one model forward pass."""
+    gesture, user = _forward_batch([payload])
+    return {
+        "gesture_embedding": gesture[0],
+        "user_embedding": user[0],
+    }
+
+
+def embed_both_batch(payloads: Sequence[Any]):
+    """Efficiently compute both embedding matrices with one model forward pass."""
+    gesture, user = _forward_batch(payloads)
+    return {
+        "gesture_embeddings": gesture,
+        "user_embeddings": user,
+    }
+
+
+def get_thresholds() -> dict:
+    _ensure_loaded()
+    return dict(_THRESHOLDS)
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Optional helper. Backend may instead compute normalized-vector dot products."""
+    a = np.asarray(a, dtype=np.float32).reshape(-1)
+    b = np.asarray(b, dtype=np.float32).reshape(-1)
+    a = a / max(float(np.linalg.norm(a)), 1e-12)
+    b = b / max(float(np.linalg.norm(b)), 1e-12)
+    return float(np.dot(a, b))

@@ -1,32 +1,43 @@
 {
-  "release": "handonly-supcon-v1.0.0",
-  "gesture_release": "handonly-gesture-1dcnn-v1.0.0",
-  "created": "2026-09-10",
+  "release": "shared-dual-head-v1.1.1",
+  "status": "FINALIZED",
+  "created_from_checkpoint": "C:\\dev\\WITECK_FINAL_TRAINING_CODE_v1.0.1_DIRECT_TEMPLATE\\output\\shared_dual_head\\seed_40\\shared_dual_head.pt",
+  "architecture": "hand-only shared two-stream 1D-CNN + gesture/user embedding heads",
+  "embedding_dim": 128,
+  "input_contract": {
+    "raw": "MediaPipe Hand landmarks",
+    "sequence_length": 32,
+    "feature_dim": 127,
+    "right_hand_only": true
+  },
+  "threading": {
+    "internal_rlock": true,
+    "backend_model_forward_lock_required": false
+  },
+  "matching": {
+    "owner": "backend",
+    "similarity": "cosine",
+    "policy": "one gesture template + one user template per user"
+  },
+  "python_bytecode": {
+    "included": false,
+    "rule": "__pycache__ and *.pyc excluded from manifest and ZIP"
+  },
   "files": [
     {
-      "path": "README.md",
-      "bytes": 3319,
-      "sha256": "172a6b262113b300b6f25be7dc95d0ecca3b50ed1079b7f708954dde4ea137a3"
-    },
-    {
       "path": "__init__.py",
-      "bytes": 366,
-      "sha256": "967070a53811e0fe84d89a81a7d647999454ca9f1e49a3a98ac55f8ba9ab1d20"
+      "bytes": 672,
+      "sha256": "f1f2cc88fb7f9d35c64ab4e713e50e7bfdace06c6b17a5e7208a7f026b133068"
     },
     {
       "path": "calibration_report.md",
-      "bytes": 1166,
-      "sha256": "f076c8f9e40dc4f5564f961db5eba129345f70ad9fc25369ffdf20f678d65ac7"
-    },
-    {
-      "path": "cpu_benchmark.json",
-      "bytes": 603,
-      "sha256": "135a1d17371f239aae823451ef4554226738cbc08ad800a0c255aeeee1d88d6f"
+      "bytes": 1463,
+      "sha256": "c778a45c05830b2219eaa86793e231f26534f1ab985ca93d203600cea93692af"
     },
     {
       "path": "encoder.py",
-      "bytes": 5089,
-      "sha256": "8a70c18124176a0b6ea685738bdd45b592487c51a1fc9fa5556524ff4a935059"
+      "bytes": 6442,
+      "sha256": "885f8b7fdb6e26403814adcbc359e7ac280140e98d71c9f542ad0286e5488486"
     },
     {
       "path": "features.py",
@@ -35,13 +46,18 @@
     },
     {
       "path": "model_defs.py",
-      "bytes": 3396,
-      "sha256": "dceea699fefb496aed43c5c32fc61b2c4cc72b9255b86a29666a0dc2599f8504"
+      "bytes": 2675,
+      "sha256": "f1488cce68c6c87993c389a33568931c25d2ff5220cc5227b54846286b5d105b"
     },
     {
       "path": "preprocess.json",
-      "bytes": 14050,
-      "sha256": "26f01dde01500fb8afe72ceda243eaeda125f46f3b86954ed7ce355f918615e8"
+      "bytes": 8706,
+      "sha256": "aadf1eb93fc6ec977027234b81d6693f3987282c56258450873cb5ce85c6c044"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2417,
+      "sha256": "ea08cbaf66c6334af3a2c45359641eeefe075d7fe5614aa5bb824eb6cdfd6475"
     },
     {
       "path": "requirements.txt",
@@ -50,23 +66,18 @@
     },
     {
       "path": "smoke_test.py",
-      "bytes": 1351,
-      "sha256": "d7f3d3489b297f2cb188839ec103d1e582b84c51d04d617deba88f7a5f090b3f"
+      "bytes": 2146,
+      "sha256": "1cbbeda3edfe11f4274eaa825c70b5e83544ed4f57838bea264234ff28b239d9"
     },
     {
       "path": "thresholds.json",
-      "bytes": 5859,
-      "sha256": "beccfa2402328cf8ecb45ca7e13a859c35e12a7884eb09a416b785dff4d01ab2"
+      "bytes": 857,
+      "sha256": "919557306af992bba6ce3dec65aec91ca52822334860f599601c325d173efd32"
     },
     {
-      "path": "weights/auth_handonly_supcon_v1.pt",
-      "bytes": 515107,
-      "sha256": "c40551375f05b5fe23af8ae52e27480c69e684726e3c2665e63cf34fb2b3a699"
-    },
-    {
-      "path": "weights/gesture_handonly_1dcnn_v1.pt",
-      "bytes": 470854,
-      "sha256": "995cb77b632b6047c4c6a18d0fb65d0affe1c57c674bda9a615bcb4b277ad620"
+      "path": "weights/shared_dual_head_v1.pt",
+      "bytes": 614117,
+      "sha256": "18b70faaab5ce1ed89990379d48253d042d0ed21ca381c9a20afa01788b15266"
     }
   ]
 }
