@@ -10,7 +10,7 @@ import '../widgets/secondary_button.dart';
 import '../widgets/status_chip.dart';
 import 'add_user_sheet.dart';
 import 'admin_screen.dart';
-import 'auth_screen.dart';
+import 'challenge_screen.dart';
 import 'enroll_screen.dart';
 
 /// 홈 화면. (SPEC 8.1)
@@ -54,9 +54,11 @@ class HomeScreen extends ConsumerWidget {
               const SizedBox(height: 32),
               PrimaryButton(
                 label: '인증하기',
+                // 인증 전에 안티스푸핑 Challenge를 거친다. 통과해야 AuthScreen으로
+                // 넘어가고, 실패하면 /verify를 아예 호출하지 않는다.
                 onPressed: selected == null
                     ? null
-                    : () => _push(context, const AuthScreen()),
+                    : () => _push(context, const ChallengeScreen()),
               ),
               const SizedBox(height: 12),
               SecondaryButton(

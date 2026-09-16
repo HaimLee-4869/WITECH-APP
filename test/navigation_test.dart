@@ -9,6 +9,7 @@ import 'package:signid/models/server_config.dart';
 import 'package:signid/models/verify.dart';
 import 'package:signid/screens/admin_screen.dart';
 import 'package:signid/screens/auth_screen.dart';
+import 'package:signid/screens/challenge_screen.dart';
 import 'package:signid/screens/enroll_screen.dart';
 import 'package:signid/screens/home_screen.dart';
 import 'package:signid/screens/result_screen.dart';
@@ -107,7 +108,8 @@ void main() {
     view.resetDevicePixelRatio();
   });
 
-  testWidgets('홈에서 인증 화면으로 이동한다', (tester) async {
+  testWidgets('홈에서 인증을 누르면 동작 확인(Challenge) 화면이 먼저 나온다', (tester) async {
+    // 인증 전에 안티스푸핑 Challenge를 거친다. 통과해야 AuthScreen으로 간다.
     await tester.pumpWidget(_app());
     await tester.pump(); // GET /users 응답 반영
     expect(find.byType(HomeScreen), findsOneWidget);
@@ -117,10 +119,15 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.byType(AuthScreen), findsOneWidget);
-    expect(find.text('수어 암호를 입력하세요'), findsOneWidget);
-    expect(find.text('인증'), findsOneWidget);
+    expect(find.byType(ChallengeScreen), findsOneWidget);
+    expect(find.byType(AuthScreen), findsNothing);
+    expect(find.text('동작 확인'), findsOneWidget);
     expect(find.text('취소'), findsOneWidget);
+
+    await tester.tap(find.text('취소'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(HomeScreen), findsOneWidget);
   });
 
   testWidgets('홈에서 등록 화면으로 이동한다', (tester) async {

@@ -1,3 +1,4 @@
+import '../challenge/challenge_config.dart';
 import '../core/config.dart';
 
 /// `GET /config` 응답. 앱은 이 값으로 등록 화면을 그린다. (backend/README 4.4)
@@ -19,12 +20,19 @@ class ServerConfig {
   /// 서버가 쓰는 인증 모델 버전. 화면 표시·디버깅용.
   final String modelVersion;
 
+  /// 안티스푸핑 Challenge 판정값.
+  ///
+  /// **null이면 Challenge를 시작할 수 없다.** 임계값을 앱에 박아두지 않기로 했으므로
+  /// 대체값이 없다. 서버가 오래된 버전이거나 응답을 못 받은 경우다.
+  final ChallengeConfig? challenge;
+
   const ServerConfig({
     required this.enrollmentTakes,
     required this.enrollmentGestures,
     required this.captureDurationMs,
     required this.handRequired,
     required this.modelVersion,
+    this.challenge,
   });
 
   /// 서버 응답을 받기 전/실패했을 때 쓰는 기본값.
@@ -48,6 +56,30 @@ class ServerConfig {
         fallback.captureDurationMs,
     handRequired: json['handRequired'] as String? ?? fallback.handRequired,
     modelVersion: json['modelVersion'] as String? ?? fallback.modelVersion,
+    // 형태가 예상과 다르면 null로 두고 Challenge를 막는다. 임계값을 추측해서
+    // 채우면 도출과 다른 기준으로 판정하게 된다.
+    challenge: switch (json['challenge']) {
+      final Map<String, dynamic> c => _tryChallenge(c),
+      _ => null,
+    },
+  );
+
+  static ChallengeConfig? _tryChallenge(Map<String, dynamic> json) {
+    try {
+      return ChallengeConfig.fromJson(json);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Challenge 설정만 갈아끼운 사본. 테스트에서 주입할 때 쓴다.
+  ServerConfig copyWithChallenge(ChallengeConfig? challenge) => ServerConfig(
+    enrollmentTakes: enrollmentTakes,
+    enrollmentGestures: enrollmentGestures,
+    captureDurationMs: captureDurationMs,
+    handRequired: handRequired,
+    modelVersion: modelVersion,
+    challenge: challenge,
   );
 
   /// 오른손만 허용하는지. 화면 안내 문구를 띄울지 결정한다.
