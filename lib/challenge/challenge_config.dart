@@ -123,15 +123,42 @@ class TrackingConfig {
   /// [HandFrame.score]가 항상 null이고, 판정은 값이 있을 때만 이 관문을 본다.
   final double minDetectionScore;
 
+  /// 최근 프레임 간격의 중앙값에 이 배수를 곱한 값이 '손 없음' 판단 기준이 된다.
+  ///
+  /// 고정 상수(100ms)를 쓰다가 실기기에서 터졌다. 14fps면 간격이 71ms라 여유가
+  /// 29ms뿐이고, 한 프레임만 늦어도(110~170ms 관측) 이동 윈도우가 비워져
+  /// 550ms를 채울 기회가 없었다. 측정값이 아니라 정책값이다.
+  final double frameStaleFactor;
+  final int frameStaleMinMs;
+  final int frameStaleMaxMs;
+
   const TrackingConfig({
     required this.maxLostFrames,
     required this.minDetectionScore,
+    required this.frameStaleFactor,
+    required this.frameStaleMinMs,
+    required this.frameStaleMaxMs,
   });
 
   factory TrackingConfig.fromJson(Map<String, dynamic> json) => TrackingConfig(
         maxLostFrames: (json['maxLostFrames'] as num).toInt(),
         minDetectionScore: (json['minDetectionScore'] as num).toDouble(),
+        frameStaleFactor:
+            (json['frameStaleFactor'] as num?)?.toDouble() ?? 3.0,
+        frameStaleMinMs: (json['frameStaleMinMs'] as num?)?.toInt() ?? 150,
+        frameStaleMaxMs: (json['frameStaleMaxMs'] as num?)?.toInt() ?? 800,
       );
+
+  /// 프레임 간격 중앙값 [medianGapMs]에서 '손 없음' 판단 기준을 유도한다.
+  ///
+  /// 아직 표본이 없으면([medianGapMs]가 0 이하) 하한을 쓴다.
+  Duration staleThreshold(double medianGapMs) {
+    final double derived =
+        medianGapMs > 0 ? medianGapMs * frameStaleFactor : frameStaleMinMs.toDouble();
+    final double clamped =
+        derived.clamp(frameStaleMinMs.toDouble(), frameStaleMaxMs.toDouble());
+    return Duration(milliseconds: clamped.round());
+  }
 }
 
 /// 단계 구성. 기본은 손 모양 2 + 이동 1의 3단계다.

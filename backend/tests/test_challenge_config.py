@@ -201,3 +201,31 @@ def test_partial_direction_map_is_rejected(client):
     assert res.status_code == 422
     assert client.get("/config").json()["challenge"]["movement"]["directionMap"][
         "MOVE_RIGHT"] == ["x", 1]
+
+
+def test_frame_stale_knobs_are_served(client):
+    """'손 없음' 판단 기준도 서버가 정한다. 앱에 고정 상수를 두지 않는다."""
+    tracking = client.get("/config").json()["challenge"]["tracking"]
+    assert tracking["frameStaleFactor"] == 3.0
+    assert tracking["frameStaleMinMs"] == 150
+    assert tracking["frameStaleMaxMs"] == 800
+
+
+def test_frame_stale_factor_is_adjustable(client):
+    res = client.patch(
+        "/admin/config",
+        json={"challenge": {"tracking": {"frameStaleFactor": 4.5}}},
+    )
+    assert res.status_code == 200
+    assert res.json()["challenge"]["tracking"]["frameStaleFactor"] == 4.5
+    # 나머지는 그대로
+    assert res.json()["challenge"]["tracking"]["maxLostFrames"] == 38
+
+
+def test_frame_stale_bounds_must_be_ordered(client):
+    res = client.patch(
+        "/admin/config",
+        json={"challenge": {"tracking": {"frameStaleMinMs": 900}}},  # max 800보다 큼
+    )
+    assert res.status_code == 422
+    assert client.get("/config").json()["challenge"]["tracking"]["frameStaleMinMs"] == 150

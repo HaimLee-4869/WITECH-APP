@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/hand_connections.dart';
+import '../core/screen_rotation.dart';
 import '../core/theme.dart';
 import '../models/landmark.dart';
 
@@ -80,21 +81,11 @@ class HandOverlayPainter extends CustomPainter {
     var y = lm.y;
 
     // 1) 센서 회전 보정. 이미지 내용을 시계방향으로 rotationDegrees 만큼 돌린다.
-    switch (rotationDegrees % 360) {
-      case 90:
-        final tx = x;
-        x = 1.0 - y;
-        y = tx;
-      case 180:
-        x = 1.0 - x;
-        y = 1.0 - y;
-      case 270:
-        final tx = x;
-        x = y;
-        y = 1.0 - tx;
-      default:
-        break; // 0도는 그대로
-    }
+    //    ⚠️ 판정 입력(ChallengeController)과 **같은 함수**를 쓴다. 두 군데에 따로
+    //    구현하면 갈라지고, 실제로 갈라져서 이동 방향이 90도 돌아간 적이 있다.
+    final rotated = rotateNormalizedPoint(x, y, rotationDegrees);
+    x = rotated.x;
+    y = rotated.y;
 
     // 2) 표시용 미러링. (서버 전송 좌표에는 적용되지 않는다)
     if (mirror) x = 1.0 - x;

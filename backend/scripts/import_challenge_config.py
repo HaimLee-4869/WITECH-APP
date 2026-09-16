@@ -105,6 +105,13 @@ def convert(source: dict, previous: dict) -> dict:
         )
     for src, dst in OPTIONAL:
         _set(out, dst, source.get(src))
+
+    # 원본(challenge_response)에 없는 앱 운영값은 기존 값을 이어받는다.
+    # 판정 임계값이 아니라 앱이 프레임을 다루는 방식이라 도출 대상이 아니다.
+    tracking = previous.get("tracking", {})
+    for key in ("frameStaleFactor", "frameStaleMinMs", "frameStaleMaxMs"):
+        if key in tracking:
+            _set(out, f"tracking.{key}", tracking[key])
     return out
 
 

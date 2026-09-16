@@ -197,6 +197,24 @@ class ChallengeTrackingOut(ResponseModel):
     max_lost_frames: int = Field(ge=1, le=300)
     min_detection_score: float = Field(ge=0.0, le=1.0)
 
+    # 앱이 '손 없음'을 만들어 넣기까지 기다리는 시간. 프레임이 이보다 오래 안 오면
+    # 손이 사라진 것으로 보고, 이동 판정 윈도우를 비운다.
+    #
+    # 고정 상수(100ms)를 쓰다가 실기기에서 터졌다. 14fps면 프레임 간격이 71ms라
+    # 여유가 29ms뿐이고, 한 프레임만 늦어도(110~170ms 관측) 윈도우가 비워져
+    # 550ms를 채울 기회가 없었다. 최근 프레임 간격의 중앙값 × factor로 유도한다.
+    #
+    # factor는 측정값이 아니라 정책값이다. 실기기 체감으로 조정한다.
+    frame_stale_factor: float = Field(default=3.0, gt=1.0, le=20.0)
+    frame_stale_min_ms: int = Field(default=150, ge=30, le=5000)
+    frame_stale_max_ms: int = Field(default=800, ge=50, le=10000)
+
+    @model_validator(mode="after")
+    def _check_bounds(self):
+        if self.frame_stale_min_ms > self.frame_stale_max_ms:
+            raise ValueError("frameStaleMinMs가 frameStaleMaxMs보다 크다")
+        return self
+
 
 class ChallengeStepsOut(ResponseModel):
     """단계 구성. 3단계(손 모양 2 + 이동 1)가 기본이다."""

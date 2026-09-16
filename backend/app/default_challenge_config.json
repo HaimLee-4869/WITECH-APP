@@ -33,7 +33,10 @@
   },
   "tracking": {
     "maxLostFrames": 38,
-    "minDetectionScore": 0.938
+    "minDetectionScore": 0.938,
+    "frameStaleFactor": 3.0,
+    "frameStaleMinMs": 150,
+    "frameStaleMaxMs": 800
   },
   "steps": {
     "numShapes": 2,

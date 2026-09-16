@@ -19,6 +19,7 @@ import '../challenge/challenge_debug_format.dart';
 import '../challenge/challenge_generator.dart';
 import '../challenge/challenge_state_machine.dart';
 import '../challenge/geometry.dart';
+import '../core/screen_rotation.dart';
 import '../models/camera_info.dart';
 import '../models/landmark.dart';
 import '../screens/challenge_screen.dart' show kShowChallengeDebug;
@@ -150,9 +151,10 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
   /// 손 소실을 세려면 `handFound: false` 관측이 필요하므로 여기서 만들어 넣는다.
   static const Duration _watchdogPeriod = Duration(milliseconds: 33);
 
-  /// 이 시간 안에 프레임이 왔으면 손이 있는 것으로 본다. 워치독이 만든 '손 없음'이
-  /// 정상 프레임 사이의 지터를 손 소실로 오인하지 않게 한다.
-  static const Duration _frameFreshness = Duration(milliseconds: 100);
+  /// 프레임 간격을 이만큼 모아 중앙값을 낸다. 순간 fps와 '손 없음' 기준의 근거다.
+  ///
+  /// 너무 짧으면 한 번 튄 값에 흔들리고, 너무 길면 fps가 변해도 따라가지 못한다.
+  static const int _gapWindow = 15;
 
   late LandmarkSource _source;
   late ApiClient _api;
@@ -164,7 +166,13 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
   final Stopwatch _clock = Stopwatch();
   final Stopwatch _sinceLastFrame = Stopwatch();
 
-  /// 프레임이 실제로 도착한 간격에서 추정한 fps. 이동 윈도우 크기에 쓴다.
+  /// 최근 프레임 간격(ms). 순간 fps와 '손 없음' 판단 기준을 여기서 뽑는다.
+  final List<int> _gaps = <int>[];
+
+  /// 최근 간격 기준 순간 fps. 세션 누적 평균이 아니다.
+  ///
+  /// 누적 평균을 쓰다가 실기기에서 2.5, 5.6처럼 나왔다. 카메라가 올라오기 전
+  /// 구간까지 섞여서다. 실제로는 12~14fps였다.
   double _observedFps = 0.0;
   int _frameCount = 0;
   int _lostInjections = 0;
@@ -217,6 +225,7 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
       fps: _observedFps > 0 ? _observedFps : config.frameReferenceFps,
     );
     _frameCount = 0;
+    _gaps.clear();
     _lostInjections = 0;
     _lastFrameGapMs = 0;
     _loggedStep = 0;
@@ -278,8 +287,8 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
     if (machine == null || state.finished) return;
 
     _frameCount++;
-    _updateFps();
     _lastFrameGapMs = _sinceLastFrame.elapsedMilliseconds;
+    _recordGap(_lastFrameGapMs);
     _sinceLastFrame
       ..reset()
       ..start();
@@ -294,14 +303,30 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
       return;
     }
 
-    // ⚠️ 좌표계 규칙: **원본 좌표를 그대로 넣는다.**
-    //   MediaPipe 입력: 원본 / 서버 전송: 원본 / 화면·오버레이: 거울
-    //   방향 판정의 좌우 반전은 MovementDetector가 **라벨에만** 적용한다.
-    //   여기서 x를 뒤집으면 이중 반전이 되어 좌우가 도로 맞아버린다.
-    final Coords raw = <List<double>>[
-      for (final Landmark p in frame.landmarks) <double>[p.x, p.y, p.z],
+    // ⚠️ 좌표계 규칙
+    //   MediaPipe 입력: 원본 / **서버 전송: 원본** / 화면·오버레이: 회전 + 거울
+    //   판정 입력: 회전만. 거울은 넣지 않는다.
+    //
+    // 회전은 반드시 넣어야 한다. 센서는 가로(720×480)인데 폰은 세로라, 회전을
+    // 빼면 x와 y가 통째로 바뀐다. 각도는 회전에 불변이라 손 모양은 맞지만
+    // 이동 방향은 90도 돌아간다(2026-09-18 실기기: req=MOVE_UP → label=MOVE_RIGHT).
+    //
+    // 거울은 넣지 않는다. MovementDetector가 coordinateFrame=mirrored일 때
+    // **라벨만** 뒤집는다. 좌표까지 뒤집으면 반전이 상쇄된다.
+    //
+    // 서버로 가는 /verify·/enroll 좌표는 이 변환을 거치지 않는다. 등록과 인증이
+    // 같은 규약(원본)을 쓰고 있어 건드리면 기존 템플릿이 무효가 된다.
+    final int rotation = _source.transform.rotationDegrees;
+    final Coords rotated = <List<double>>[
+      for (final Landmark p in frame.landmarks)
+        () {
+          final r = rotateNormalizedPoint(p.x, p.y, rotation);
+          return <double>[r.x, r.y, p.z];
+        }(),
     ];
-    final Coords screen = toIsotropic(raw, width, height);
+    // 90·270도에서는 가로·세로가 바뀐다. 회전 전 크기로 보정하면 다시 왜곡된다.
+    final size = rotatedFrameSize(width, height, rotation);
+    final Coords screen = toIsotropic(rotated, size.width, size.height);
 
     _latestFrame = frame;
     _push(
@@ -328,7 +353,7 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
   void _onWatchdogTick() {
     final ChallengeStateMachine? machine = _machine;
     if (machine == null || state.finished) return;
-    if (_sinceLastFrame.elapsed < _frameFreshness) return;
+    if (_sinceLastFrame.elapsed < _staleThreshold) return;
     // 손이 실제로 없는 경우와, 프레임이 늦어 신선도 기준을 넘긴 경우를 여기서는
     // 구분할 수 없다. 둘 다 윈도우를 비우므로 횟수를 세어 화면에 드러낸다.
     _lostInjections++;
@@ -422,11 +447,37 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
     }
   }
 
-  void _updateFps() {
-    // 첫 몇 프레임은 카메라가 안정되기 전이라 쓰지 않는다.
-    if (_frameCount < 5) return;
-    final int elapsed = _clock.elapsedMilliseconds;
-    if (elapsed > 0) _observedFps = _frameCount / (elapsed / 1000.0);
+  /// 프레임 간격을 모아 순간 fps를 낸다.
+  void _recordGap(int gapMs) {
+    // 첫 프레임의 '간격'은 카메라가 올라오는 시간이라 근거가 못 된다.
+    if (_frameCount <= 1 || gapMs <= 0) return;
+    _gaps.add(gapMs);
+    if (_gaps.length > _gapWindow) _gaps.removeAt(0);
+    final double median = _medianGapMs;
+    if (median > 0) _observedFps = 1000.0 / median;
+  }
+
+  /// 최근 프레임 간격의 중앙값. 표본이 없으면 0.
+  ///
+  /// 평균이 아니라 중앙값이다. 한 번 크게 튄 프레임에 기준이 끌려가면 안 된다.
+  double get _medianGapMs {
+    if (_gaps.isEmpty) return 0.0;
+    final List<int> sorted = List<int>.of(_gaps)..sort();
+    final int n = sorted.length;
+    return n.isOdd
+        ? sorted[n ~/ 2].toDouble()
+        : (sorted[n ~/ 2 - 1] + sorted[n ~/ 2]) / 2.0;
+  }
+
+  /// '손 없음'으로 볼 프레임 공백. **실측 간격에서 유도한다.**
+  ///
+  /// 고정 100ms를 쓰다가 실기기에서 터졌다. 14fps면 간격이 71ms라 여유가 29ms뿐이고,
+  /// 한 프레임만 늦어도(110~170ms 관측) 손 없음이 주입돼 이동 윈도우가 비워졌다.
+  /// 배수와 상·하한은 서버 설정에서 온다.
+  Duration get _staleThreshold {
+    final ChallengeConfig? config = _config;
+    if (config == null) return const Duration(milliseconds: 150);
+    return config.tracking.staleThreshold(_medianGapMs);
   }
 
   void _fail(String notice) {
