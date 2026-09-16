@@ -79,15 +79,16 @@ async def reindex(body: ReindexRequest, request: Request) -> ReindexResponse:
     return await run_in_threadpool(work)
 
 
-def _deep_merge(base: dict, patch: dict) -> dict:
-    """patch의 키만 base 위에 덮는다. dict는 재귀, 그 외(리스트 포함)는 통째 교체.
+# 부분 병합하면 안 되는 키. 방향 하나만 바뀐 표 같은 중간 상태가 생기면
+# 나머지 방향이 옛 도출값으로 남아 조용히 어긋난다. 통째로 바꾸게 한다.
+_REPLACE_WHOLE = frozenset({"directionMap"})
 
-    directionMap이나 shapePool을 부분 병합하면 중간 상태(방향 하나만 바뀐 표)가
-    생기므로 리스트·표는 통째로 바꾼다.
-    """
+
+def _deep_merge(base: dict, patch: dict) -> dict:
+    """patch의 키만 base 위에 덮는다. dict는 재귀, 리스트와 _REPLACE_WHOLE은 통째 교체."""
     out = dict(base)
     for key, value in patch.items():
-        if isinstance(value, dict) and isinstance(out.get(key), dict):
+        if key not in _REPLACE_WHOLE and isinstance(value, dict) and isinstance(out.get(key), dict):
             out[key] = _deep_merge(out[key], value)
         else:
             out[key] = value

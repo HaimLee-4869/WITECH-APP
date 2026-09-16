@@ -174,3 +174,30 @@ def test_import_script_dry_run_reports_no_change():
     assert out.returncode == 0, out.stdout + out.stderr
     assert "바뀐 값 없음" in out.stdout
     assert "저장하지 않았다" in out.stdout
+
+
+def test_direction_map_is_replaced_not_merged(client):
+    """방향 표를 부분 병합하면 나머지가 옛 도출값으로 남아 조용히 어긋난다."""
+    res = client.patch("/admin/config", json={"challenge": {"movement": {"directionMap": {
+        "MOVE_LEFT": ["x", 1], "MOVE_RIGHT": ["x", -1],
+        "MOVE_UP": ["y", 1], "MOVE_DOWN": ["y", -1],
+    }}}})
+    assert res.status_code == 200
+
+    table = res.json()["challenge"]["movement"]["directionMap"]
+    assert table == {
+        "MOVE_LEFT": ["x", 1], "MOVE_RIGHT": ["x", -1],
+        "MOVE_UP": ["y", 1], "MOVE_DOWN": ["y", -1],
+    }
+    # 같은 요청의 다른 movement 키는 병합으로 남아 있어야 한다
+    assert res.json()["challenge"]["movement"]["minDisplacementRatio"] == 0.226
+
+
+def test_partial_direction_map_is_rejected(client):
+    """일부 방향만 보내면 movePool을 못 덮어 검증에서 걸린다."""
+    res = client.patch("/admin/config", json={
+        "challenge": {"movement": {"directionMap": {"MOVE_LEFT": ["x", 1]}}}
+    })
+    assert res.status_code == 422
+    assert client.get("/config").json()["challenge"]["movement"]["directionMap"][
+        "MOVE_RIGHT"] == ["x", 1]
