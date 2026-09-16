@@ -16,6 +16,7 @@ import '../state/challenge_controller.dart';
 import '../state/providers.dart';
 import '../widgets/capture_ring.dart';
 import '../widgets/challenge_guide.dart';
+import '../widgets/challenge_move_debug.dart';
 import '../widgets/hand_guide_notice.dart';
 import '../widgets/hand_overlay_painter.dart';
 import '../widgets/primary_button.dart';
@@ -50,8 +51,6 @@ class _ChallengeScreenState extends ConsumerState<ChallengeScreen> {
       if (phase == ChallengePhase.passed) _goToAuth();
     });
 
-    final double diameter = captureRingDiameter(MediaQuery.sizeOf(context));
-
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: SafeArea(
@@ -72,7 +71,17 @@ class _ChallengeScreenState extends ConsumerState<ChallengeScreen> {
               const SizedBox(height: 12),
               const _StepIndicator(),
               const SizedBox(height: 12),
-              Center(child: _CaptureArea(diameter: diameter)),
+              // 원이 남은 세로 공간을 전부 쓴다. 이동 단계에서 손을 움직일
+              // 공간이 좁으면 변위 관문을 넘기기 어렵다.
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (context, constraints) => Center(
+                    child: _CaptureArea(
+                      diameter: captureRingDiameterIn(constraints),
+                    ),
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               const _TimeBar(),
               const SizedBox(height: 12),
@@ -83,7 +92,7 @@ class _ChallengeScreenState extends ConsumerState<ChallengeScreen> {
                 const SizedBox(height: 8),
                 const _DebugLine(),
               ],
-              const Spacer(),
+              const SizedBox(height: 12),
               const _Actions(),
               const SizedBox(height: 24),
             ],
@@ -271,30 +280,46 @@ class _Prompt extends ConsumerWidget {
   }
 }
 
-/// 개발용 디버그 줄. [kShowChallengeDebug]로 끈다.
+/// 개발용 진단 표시. [kShowChallengeDebug]로 끈다.
+///
+/// 이동 단계에서는 두 관문의 값을 그대로 보여준다. 임계값을 짐작해서 바꾸기 전에
+/// 무엇이 막고 있는지부터 눈으로 본다
+/// (challenge_response/scripts/run_challenge.py의 진단 패널과 같은 형식).
 class _DebugLine extends ConsumerWidget {
   const _DebugLine();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
+    final ChallengeConfig? config = ref.watch(
+      serverConfigProvider.select((s) => s.config.challenge),
+    );
     final Status? status = flow.status;
-    if (status == null) return const SizedBox.shrink();
+    if (status == null || config == null) return const SizedBox.shrink();
 
+    final MoveProbe? probe = status.moveProbe;
+    if (probe != null) {
+      return ChallengeMoveDebug(
+        probe: probe,
+        config: config,
+        requested: status.currentAction,
+        observedFps: flow.observedFps,
+        lastFrameGapMs: flow.lastFrameGapMs,
+        lostInjections: flow.lostInjections,
+      );
+    }
+
+    // 손 모양 단계는 한 줄이면 충분하다.
     final StringBuffer buffer = StringBuffer()
       ..write('검출: ${challengeShapeLabel(flow.debugShape)}');
-    if (status.detectedMove != 'NONE') {
-      buffer.write(' / 이동 ${status.detectedMove}');
+    if (status.shapeConfidence > 0) {
+      buffer.write(' (${status.shapeConfidence.toStringAsFixed(2)})');
     }
     if (status.awaitingEscape) {
       buffer.write(' / 이탈 ${(status.escapeProgress * 100).round()}%');
     }
-    final MoveProbe? probe = status.moveProbe;
-    if (probe != null && probe.windowReady) {
-      buffer.write(
-        ' / 변위 ${probe.displacementRatio.toStringAsFixed(2)}'
-        ' 축비 ${probe.axisRatio.isFinite ? probe.axisRatio.toStringAsFixed(1) : '∞'}',
-      );
+    if (flow.observedFps > 0) {
+      buffer.write(' / ${flow.observedFps.toStringAsFixed(1)}fps');
     }
 
     return Text(

@@ -16,6 +16,18 @@ double captureRingDiameter(Size screen) {
   return byWidth < byHeight ? byWidth : byHeight;
 }
 
+/// 주어진 공간을 꽉 채우는 지름.
+///
+/// 안티스푸핑 Challenge처럼 **손을 크게 움직여야 하는** 화면에서 쓴다. 원이 작으면
+/// 프리뷰에 보이는 범위가 좁아 사용자가 손을 조금만 움직이고, 변위 관문
+/// (`minDisplacementRatio`)을 못 넘긴다. 인증·등록은 손을 제자리에서 수행하므로
+/// [captureRingDiameter]의 고정 비율을 그대로 쓴다.
+double captureRingDiameterIn(BoxConstraints constraints) {
+  final side = math.min(constraints.maxWidth, constraints.maxHeight);
+  // 너무 작으면 오버레이가 안 보이고, 너무 크면 태블릿에서 화면을 다 먹는다.
+  return side.clamp(180.0, 560.0);
+}
+
 /// 인증/등록 화면의 원형 캡처 영역. (SPEC 8.2)
 ///
 /// 원 안쪽에만 [child](카메라 프리뷰 + 오버레이)가 보이도록 클립하고, 테두리를

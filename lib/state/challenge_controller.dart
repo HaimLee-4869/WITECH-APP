@@ -63,6 +63,22 @@ class ChallengeFlowState {
   /// 이중으로 붙으므로 여기서 들고 있는다.
   final HandFrame? latestFrame;
 
+  /// 프레임 도착 간격에서 추정한 실측 fps. 진단 표시용.
+  ///
+  /// 임계값은 30fps 파일럿 영상에서 도출됐다. 실기기가 몇 fps로 도는지 같이
+  /// 보여줘야 판정이 이상할 때 조건 차이를 의심할 수 있다.
+  final double observedFps;
+
+  /// 워치독이 '손 없음'을 만들어 넣은 횟수(현재 단계 기준).
+  ///
+  /// 손 없음 관측은 이동 판정 윈도우를 **비운다.** 실제로 손이 보이는데도 이 수가
+  /// 계속 올라간다면, 프레임 간격이 [ChallengeController]의 신선도 기준을 넘어선
+  /// 것이다. 그 경우 윈도우가 찰 기회가 없어 이동이 영영 확정되지 않는다.
+  final int lostInjections;
+
+  /// 마지막 프레임 사이 간격(ms). 실측 프레임 간격이다.
+  final int lastFrameGapMs;
+
   const ChallengeFlowState({
     this.phase = ChallengePhase.idle,
     this.status,
@@ -71,6 +87,9 @@ class ChallengeFlowState {
     this.notice,
     this.debugShape = '',
     this.latestFrame,
+    this.observedFps = 0.0,
+    this.lostInjections = 0,
+    this.lastFrameGapMs = 0,
   });
 
   ChallengeFlowState copyWith({
@@ -82,6 +101,9 @@ class ChallengeFlowState {
     bool clearNotice = false,
     String? debugShape,
     HandFrame? latestFrame,
+    double? observedFps,
+    int? lostInjections,
+    int? lastFrameGapMs,
   }) {
     return ChallengeFlowState(
       phase: phase ?? this.phase,
@@ -91,6 +113,9 @@ class ChallengeFlowState {
       notice: clearNotice ? null : (notice ?? this.notice),
       debugShape: debugShape ?? this.debugShape,
       latestFrame: latestFrame ?? this.latestFrame,
+      observedFps: observedFps ?? this.observedFps,
+      lostInjections: lostInjections ?? this.lostInjections,
+      lastFrameGapMs: lastFrameGapMs ?? this.lastFrameGapMs,
     );
   }
 
@@ -137,6 +162,8 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
   /// 프레임이 실제로 도착한 간격에서 추정한 fps. 이동 윈도우 크기에 쓴다.
   double _observedFps = 0.0;
   int _frameCount = 0;
+  int _lostInjections = 0;
+  int _lastFrameGapMs = 0;
 
   @override
   ChallengeFlowState build() {
@@ -178,6 +205,8 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
       fps: _observedFps > 0 ? _observedFps : config.frameReferenceFps,
     );
     _frameCount = 0;
+    _lostInjections = 0;
+    _lastFrameGapMs = 0;
     _clock
       ..reset()
       ..start();
@@ -231,6 +260,7 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
 
     _frameCount++;
     _updateFps();
+    _lastFrameGapMs = _sinceLastFrame.elapsedMilliseconds;
     _sinceLastFrame
       ..reset()
       ..start();
@@ -280,6 +310,9 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
     final ChallengeStateMachine? machine = _machine;
     if (machine == null || state.finished) return;
     if (_sinceLastFrame.elapsed < _frameFreshness) return;
+    // 손이 실제로 없는 경우와, 프레임이 늦어 신선도 기준을 넘긴 경우를 여기서는
+    // 구분할 수 없다. 둘 다 윈도우를 비우므로 횟수를 세어 화면에 드러낸다.
+    _lostInjections++;
     _push(machine, _lostObservation());
   }
 
@@ -302,6 +335,9 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
       status: status,
       debugShape: obs.handFound ? status.detectedShape : '—',
       latestFrame: _latestFrame,
+      observedFps: _observedFps,
+      lostInjections: _lostInjections,
+      lastFrameGapMs: _lastFrameGapMs,
     );
     if (status.finished) _stopCapture();
   }
@@ -333,7 +369,4 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
     _stopCapture();
     _machine = null;
   }
-
-  /// 실측 fps. 화면 디버그 표시에 쓴다.
-  double get observedFps => _observedFps;
 }
