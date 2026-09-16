@@ -155,6 +155,17 @@ class MockApiClient implements ApiClient {
     await Future<void>.delayed(const Duration(milliseconds: 600));
     return _mockMonthly;
   }
+
+  /// 목에서는 서버가 없으므로 모아만 둔다. 테스트가 들여다볼 수 있다.
+  final List<String> challengeDebugLines = <String>[];
+
+  @override
+  Future<void> sendChallengeDebug({
+    required String sessionId,
+    required List<String> lines,
+  }) async {
+    challengeDebugLines.addAll(lines);
+  }
 }
 
 /// 목 사용자. id는 백엔드 `scripts/seed_demo_data.py`의 팀 사용자와 같다.

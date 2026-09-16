@@ -122,4 +122,16 @@ class HttpApiClient implements ApiClient {
         .map((e) => MonthlyStat.fromJson(e as Map<String, dynamic>))
         .toList(growable: false);
   }
+
+  @override
+  Future<void> sendChallengeDebug({
+    required String sessionId,
+    required List<String> lines,
+  }) async {
+    // 응답 본문은 쓰지 않는다. 실패는 호출자가 삼킨다.
+    await _post('/debug/challenge', <String, dynamic>{
+      'sessionId': sessionId,
+      'lines': lines,
+    });
+  }
 }

@@ -15,11 +15,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../challenge/challenge_config.dart';
+import '../challenge/challenge_debug_format.dart';
 import '../challenge/challenge_generator.dart';
 import '../challenge/challenge_state_machine.dart';
 import '../challenge/geometry.dart';
 import '../models/camera_info.dart';
 import '../models/landmark.dart';
+import '../screens/challenge_screen.dart' show kShowChallengeDebug;
+import '../services/api_client.dart';
+import '../services/challenge_debug_sink.dart';
 import '../services/landmark_source.dart';
 import 'providers.dart';
 
@@ -151,6 +155,7 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
   static const Duration _frameFreshness = Duration(milliseconds: 100);
 
   late LandmarkSource _source;
+  late ApiClient _api;
   ChallengeConfig? _config;
 
   ChallengeStateMachine? _machine;
@@ -165,9 +170,16 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
   int _lostInjections = 0;
   int _lastFrameGapMs = 0;
 
+  /// 판정 로그를 서버로 흘리는 곳. [kShowChallengeDebug]가 false면 null이다.
+  ChallengeDebugSink? _sink;
+
+  /// 마지막으로 기록한 단계. 단계 전환을 한 줄로 남기려고 들고 있는다.
+  int _loggedStep = 0;
+
   @override
   ChallengeFlowState build() {
     _source = ref.watch(landmarkSourceProvider);
+    _api = ref.watch(apiClientProvider);
     _config = ref.watch(
       serverConfigProvider.select((s) => s.config.challenge),
     );
@@ -207,6 +219,13 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
     _frameCount = 0;
     _lostInjections = 0;
     _lastFrameGapMs = 0;
+    _loggedStep = 0;
+    if (kShowChallengeDebug) {
+      _sink = ChallengeDebugSink(
+        _api,
+        sessionId: _machine!.challenge.challengeId.split('-').first,
+      )..add(formatBeginLine(_machine!.challenge, config));
+    }
     _clock
       ..reset()
       ..start();
@@ -325,6 +344,7 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
 
   void _push(ChallengeStateMachine machine, Observation obs) {
     final Status status = machine.update(obs);
+    _log(machine, status, obs);
     final ChallengePhase phase = switch (status.state) {
       ChallengeState.passed => ChallengePhase.passed,
       ChallengeState.failed => ChallengePhase.failed,
@@ -342,6 +362,66 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
     if (status.finished) _stopCapture();
   }
 
+  /// 판정 상황을 한 줄씩 남긴다. 화면 패널과 **같은 값**을 쓴다.
+  void _log(ChallengeStateMachine machine, Status status, Observation obs) {
+    final ChallengeDebugSink? sink = _sink;
+    if (sink == null) return;
+
+    // 단계가 넘어갔으면 그 결과를 먼저 남긴다.
+    while (_loggedStep < status.stepIndex && _loggedStep < status.steps.length) {
+      sink.add(formatStepLine(
+        _loggedStep,
+        status.steps.length,
+        status.steps[_loggedStep],
+      ));
+      _loggedStep++;
+    }
+
+    if (obs.handFound) {
+      final MoveProbe? probe = status.moveProbe;
+      if (probe != null) {
+        sink.add(formatMoveLine(
+          probe,
+          machine.config,
+          requested: status.currentAction,
+          lostInjections: _lostInjections,
+          observedFps: _observedFps,
+          frameGapMs: _lastFrameGapMs,
+        ));
+      } else if (obs.angleCoords != null) {
+        sink.add(formatShapeLine(
+          status,
+          machine.shapeDetector.detect(obs.angleCoords!),
+          machine.config,
+          lostInjections: _lostInjections,
+          observedFps: _observedFps,
+          frameGapMs: _lastFrameGapMs,
+        ));
+      }
+    }
+
+    if (status.finished) {
+      // 실패한 단계도 기록에 남긴다.
+      if (_loggedStep < status.steps.length &&
+          status.steps[_loggedStep].failReason != null) {
+        sink.add(formatStepLine(
+          _loggedStep,
+          status.steps.length,
+          status.steps[_loggedStep],
+        ));
+      }
+      sink.add(formatResultLine(
+        status,
+        elapsedMs: _clock.elapsedMilliseconds,
+        lostInjections: _lostInjections,
+        observedFps: _observedFps,
+      ));
+      // 마지막 줄까지 보내고 닫는다. 한 세션을 통째로 볼 수 있어야 한다.
+      unawaited(sink.close());
+      _sink = null;
+    }
+  }
+
   void _updateFps() {
     // 첫 몇 프레임은 카메라가 안정되기 전이라 쓰지 않는다.
     if (_frameCount < 5) return;
@@ -350,6 +430,7 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
   }
 
   void _fail(String notice) {
+    _sink?.add(formatUnavailableLine(notice));
     _stopCapture();
     state = state.copyWith(phase: ChallengePhase.unavailable, notice: notice);
   }
@@ -367,6 +448,9 @@ class ChallengeController extends Notifier<ChallengeFlowState> {
 
   void _teardown() {
     _stopCapture();
+    final ChallengeDebugSink? sink = _sink;
+    _sink = null;
+    if (sink != null) unawaited(sink.close());
     _machine = null;
   }
 }

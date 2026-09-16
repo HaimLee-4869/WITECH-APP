@@ -108,6 +108,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | POST | `/admin/threshold` | 활성 운영점 전환 `{basis: "default" \| "demo_relaxed"}` (두 관문이 함께 바뀐다) |
 | POST | `/admin/reindex` | 재색인 `{modelVersion, dryRun}` |
 | PATCH | `/admin/config` | `app_config` 변경 |
+| POST/GET/DELETE | `/debug/challenge` | 앱의 Challenge 판정 로그 (개발용, 6.6장) |
 
 전체 스키마는 `/docs`.
 
@@ -528,6 +529,25 @@ PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로
   정한 임시값이다. 실사용 세션이 쌓이면 다시 재야 한다.
 - 앱 판정이라 **앱을 조작하면 우회된다.** 서버는 Challenge 결과를 받지도 검증하지도
   않는다. 실제 출입 통제에 쓰려면 서버 판정으로 바꿔야 한다.
+
+## 6.6 Challenge 판정 로그 (개발용)
+
+앱이 판정하므로 서버에는 근거가 남지 않는다. 실기기 화면의 진단 패널은 프레임마다
+바뀌어 읽을 수 없어서, 앱이 한 줄씩 보내고 여기서 파일과 콘솔에 남긴다.
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| POST | `/debug/challenge` | `{sessionId, lines[]}`. 앱이 모아서 보낸다(14fps면 초당 14줄) |
+| GET | `/debug/challenge` | 로그 전문. `?lines=50`이면 마지막 50줄 |
+| DELETE | `/debug/challenge` | 비운다. 세션 하나만 깨끗이 보려고 |
+
+- 파일: `backend/logs/challenge_debug.log` (git에 올라가지 않는다)
+- 콘솔: `challenge.debug` 로거. 모든 줄이 `CHALLENGE `로 시작한다
+- 줄바꿈과 제어문자를 지우고 2000바이트로 자른다. 한 줄 형식이 깨지면 grep이
+  소용없어지기 때문이다
+
+⚠️ **인증이 없다.** 앱이 보낸 문자열을 그대로 기록한다. 외부에 노출하는 배포에서는
+`DEBUG_LOG_ENABLED=false`로 끈다(404).
 
 ## 7. ai_release 교체 절차
 

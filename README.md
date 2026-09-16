@@ -386,6 +386,54 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
 `handReady` 판정에서 겪었다. `test/challenge/time_based_frames_test.dart`가 14fps와
 30fps에서 같은 시간이 걸리는지 확인한다.
 
+### 판정 로그를 PC에서 보기
+
+실기기 화면의 진단 패널은 프레임마다 바뀌어 읽을 수 없다. 같은 값을 한 줄씩 서버로
+보내고 백엔드가 파일과 콘솔에 남긴다. `kShowChallengeDebug`가 true일 때만 동작하고,
+전송이 실패해도 Challenge는 그대로 진행된다(fire and forget).
+
+```bash
+# 1) 세션 시작 전에 비운다
+curl -X DELETE localhost:8000/debug/challenge
+
+# 2) 폰에서 Challenge를 한 번 수행한다
+#    백엔드 터미널에 실시간으로 찍힌다 (로거 이름: challenge.debug)
+
+# 3) 세션이 끝나면 통째로 본다
+curl localhost:8000/debug/challenge          # 전체
+curl "localhost:8000/debug/challenge?lines=50"   # 마지막 50줄
+#    브라우저로 http://localhost:8000/debug/challenge 를 열어 복사해도 된다
+#    파일: backend/logs/challenge_debug.log
+```
+
+모든 줄이 `CHALLENGE `로 시작하고 `key=value`로만 되어 있다. grep이 쓸모 있으라고
+한 줄에 다 넣었다.
+
+```
+CHALLENGE begin id=3f2a actions=[FIST,MOVE_LEFT,OPEN_PALM] rule=... fpsRef=30.0 hold=7f escape=14f perAction=2000ms total=6000ms
+CHALLENGE shape req=FIST det=UNKNOWN conf=0.00/off hold=0%/7f ang=t151.2+/i172.4+/m168.0+/r63.1-/p61.8- thr=148.9/135.9 tipWrist=1.124/0.909 escape=- lost=0 fps=14.2 gap=71ms
+CHALLENGE step 1/3 action=FIST -> PASS elapsed=412ms retries=0
+CHALLENGE move req=MOVE_LEFT win=560/550ms(8f)O disp=0.150/0.226(x0.66)X axisRatio=2.10/3.63(x0.58)X axis=x- label=NONE verdict=undetermined blocked=gate1_disp lost=3 fps=14.2 gap=71ms
+CHALLENGE result FAIL reason=WRONG_DIRECTION step=2/3 action=MOVE_LEFT steps=1/3 elapsed=4102ms lost=7 fps=13.9
+```
+
+무엇부터 볼지:
+
+| grep | 보는 것 |
+|---|---|
+| `grep 'CHALLENGE move'` | 이동 단계만 |
+| `grep -o 'blocked=[a-z0-9_]*' \| sort \| uniq -c` | 어느 관문이 몇 번 막았는지 |
+| `grep -o 'verdict=[a-z_]*' \| sort \| uniq -c` | 반대로 잡히는지 아예 확정이 안 되는지 |
+| `grep 'blocked=window'` | 윈도우가 안 차는지 (프레임이 늦는 것이다) |
+| `grep -o 'lost=[0-9]*' \| tail -1` | 손없음 주입 누적. 손이 보이는데 올라가면 프레임 지연이다 |
+| `grep 'CHALLENGE result'` | 세션별 최종 결과와 FailReason |
+
+`disp=0.150/0.226(x0.66)X`는 "실측 0.150, 임계값 0.226, 임계값의 0.66배, 미달"이다.
+`×1.0`을 넘겨야 통과한다.
+
+⚠️ `POST /debug/challenge`는 **개발용이고 인증이 없다.** 앱이 보낸 문자열을 그대로
+파일에 쓴다. 배포에서는 `DEBUG_LOG_ENABLED=false`로 끈다(404가 된다).
+
 ### 겪은 버그: 하한값을 임계값과 비교한 것
 
 실기기에서 Challenge가 매번 `TRACKING_UNSTABLE`로 끝났다. 원인은 null 처리가 아니라

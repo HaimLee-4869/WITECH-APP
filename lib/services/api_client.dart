@@ -41,4 +41,12 @@ abstract class ApiClient {
 
   /// 관리자 화면 "월별 인증 현황" 차트 데이터.
   Future<List<MonthlyStat>> fetchMonthlyStats();
+
+  /// Challenge 판정 로그를 서버에 남긴다 (개발용).
+  ///
+  /// 실패해도 Challenge를 막지 않는다. 호출자가 예외를 삼킨다.
+  Future<void> sendChallengeDebug({
+    required String sessionId,
+    required List<String> lines,
+  });
 }

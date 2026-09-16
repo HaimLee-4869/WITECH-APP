@@ -50,6 +50,13 @@ class _RecordingApi implements ApiClient {
   Future<Never> fetchAuthLogs() => throw UnimplementedError();
   @override
   Future<Never> fetchMonthlyStats() => throw UnimplementedError();
+
+  /// 디버그 로그는 테스트에서 쓰지 않는다. 받기만 하고 버린다.
+  @override
+  Future<void> sendChallengeDebug({
+    required String sessionId,
+    required List<String> lines,
+  }) async {}
 }
 
 void main() {

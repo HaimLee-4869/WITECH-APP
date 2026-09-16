@@ -58,6 +58,13 @@ class _StubApi implements ApiClient {
   Future<List<AuthLog>> fetchAuthLogs() => throw UnimplementedError();
   @override
   Future<List<MonthlyStat>> fetchMonthlyStats() => throw UnimplementedError();
+
+  /// 디버그 로그는 테스트에서 쓰지 않는다. 받기만 하고 버린다.
+  @override
+  Future<void> sendChallengeDebug({
+    required String sessionId,
+    required List<String> lines,
+  }) async {}
 }
 
 /// 카메라 권한이 거부된 상황을 흉내 내는 소스.

@@ -9,3 +9,6 @@ __pycache__/
 
 # 마이그레이션 전 DB 백업
 *.db.bak-*
+
+# 앱이 보낸 Challenge 판정 로그
+logs/

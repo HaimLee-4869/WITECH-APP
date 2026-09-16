@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # startup에서 alembic upgrade head를 실행할지.
     auto_migrate: bool = True
 
+    # POST /debug/challenge (앱의 Challenge 판정 로그 수집)를 열지.
+    # 개발용이라 인증이 없다. 외부에 노출하는 배포에서는 false로 둘 것.
+    debug_log_enabled: bool = True
+
     # /stats/monthly 월 경계 계산용 (KST).
     stats_utc_offset_hours: int = 9
 

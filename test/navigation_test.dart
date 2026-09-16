@@ -79,6 +79,14 @@ class _InstantApi implements ApiClient {
     MonthlyStat(month: '2026-04', total: 285, passed: 255, failed: 30),
     MonthlyStat(month: '2026-05', total: 330, passed: 299, failed: 31),
   ];
+
+  /// 디버그 로그는 테스트에서 쓰지 않는다. 받기만 하고 버린다.
+  @override
+  Future<void> sendChallengeDebug({
+    required String sessionId,
+    required List<String> lines,
+  }) async {}
+
 }
 
 Widget _app() => ProviderScope(

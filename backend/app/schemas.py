@@ -260,6 +260,23 @@ class ConfigPatch(CamelModel):
     challenge: dict | None = None
 
 
+# --- 디버그 로그 -------------------------------------------------------------------
+
+class DebugLogBatch(CamelModel):
+    """앱이 모아 보내는 Challenge 판정 로그.
+
+    프레임마다 한 번씩 보내면 14fps에서 초당 14번 왕복한다. 앱이 모아서 보낸다.
+    """
+    session_id: str = Field(min_length=1, max_length=64)
+    lines: list[str] = Field(min_length=1, max_length=200)
+
+
+class DebugLogOut(ResponseModel):
+    written: int
+    path: str
+    client: str
+
+
 class HealthOut(ResponseModel):
     status: str
     model_version: str | None            # DB의 활성 모델 버전
