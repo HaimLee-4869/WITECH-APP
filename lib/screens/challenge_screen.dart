@@ -24,7 +24,7 @@ import '../widgets/secondary_button.dart';
 import 'auth_screen.dart';
 
 /// 검출된 손 모양을 화면에 띄울지. 개발용이라 시연 전에 끈다.
-const bool kShowChallengeDebug = true;
+const bool kShowChallengeDebug = false;
 
 class ChallengeScreen extends ConsumerStatefulWidget {
   const ChallengeScreen({super.key});
