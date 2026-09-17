@@ -7,6 +7,14 @@ library;
 import '../challenge/challenge_state_machine.dart';
 import '../challenge/hand_action_detector.dart';
 
+/// 세션이 끊겼을 때의 안내. 연속 촬영이라 손을 빼면 전체가 실패한다.
+const String challengeSessionBrokenNotice =
+    '인증 도중 손이 화면에서 벗어났습니다.\n'
+    '처음부터 끝까지 손을 화면 안에 유지해주세요.';
+
+/// 세션 내내 띄우는 안내. 사람은 통과 표시를 보면 손을 내리게 돼 있다.
+const String challengeKeepHandNotice = '인증이 끝날 때까지 손을 화면 안에 유지해주세요';
+
 /// 실패 사유별 안내.
 String challengeFailMessage(FailReason? reason) => switch (reason) {
       FailReason.handNotFound =>

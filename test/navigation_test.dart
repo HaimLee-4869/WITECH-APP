@@ -8,7 +8,6 @@ import 'package:signid/models/enroll.dart';
 import 'package:signid/models/server_config.dart';
 import 'package:signid/models/verify.dart';
 import 'package:signid/screens/admin_screen.dart';
-import 'package:signid/screens/auth_screen.dart';
 import 'package:signid/screens/challenge_screen.dart';
 import 'package:signid/screens/enroll_screen.dart';
 import 'package:signid/screens/home_screen.dart';
@@ -117,7 +116,8 @@ void main() {
   });
 
   testWidgets('홈에서 인증을 누르면 동작 확인(Challenge) 화면이 먼저 나온다', (tester) async {
-    // 인증 전에 안티스푸핑 Challenge를 거친다. 통과해야 AuthScreen으로 간다.
+    // 인증은 Challenge부터 시작한다. 통과하면 같은 화면에서 촬영으로
+    // 이어지므로, 별도의 인증 화면으로 넘어가지 않는다.
     await tester.pumpWidget(_app());
     await tester.pump(); // GET /users 응답 반영
     expect(find.byType(HomeScreen), findsOneWidget);
@@ -128,8 +128,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(ChallengeScreen), findsOneWidget);
-    expect(find.byType(AuthScreen), findsNothing);
-    expect(find.text('동작 확인'), findsOneWidget);
+    // Challenge와 촬영이 한 화면에서 이어진다는 것을 제목이 말한다.
+    expect(find.text('동작 확인 후 수어 암호'), findsOneWidget);
     expect(find.text('취소'), findsOneWidget);
 
     await tester.tap(find.text('취소'));
@@ -259,7 +259,7 @@ void main() {
 
     await tester.tap(find.text('인증하기'));
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.byType(AuthScreen), findsNothing);
+    expect(find.byType(ChallengeScreen), findsNothing);
 
     await tester.pump();
     expect(find.text('홍길동'), findsOneWidget);

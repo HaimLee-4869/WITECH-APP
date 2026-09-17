@@ -5,99 +5,24 @@
 /// 드러난다. 여기서 대본대로 손을 흘려보내 통과·실패가 나는지 확인한다.
 library;
 
-import 'dart:async';
-
-import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:signid/challenge/challenge_config.dart';
+import 'package:signid/core/config.dart';
 import 'package:signid/challenge/challenge_state_machine.dart';
 import 'package:signid/challenge/geometry.dart';
 import 'package:signid/challenge/hand_action_detector.dart';
 import 'package:signid/challenge/hand_sketch.dart';
-import 'package:signid/models/camera_info.dart';
-import 'package:signid/models/landmark.dart';
-import 'package:signid/models/server_config.dart';
-import 'package:signid/services/landmark_source.dart';
-import 'package:signid/state/challenge_controller.dart';
-import 'package:signid/state/providers.dart';
+import 'package:signid/state/auth_session_controller.dart';
 
 import 'config_fixture.dart';
-
-/// 대본대로 프레임을 흘리는 테스트용 소스.
-///
-/// [FakeLandmarkSource]는 사인파 손이라 요청 모양을 만들 수 없다. 여기서는
-/// 요청 동작에 맞는 손을 직접 만들어 넣는다.
-class ScriptedSource implements LandmarkSource {
-  final _controller = StreamController<HandFrame>.broadcast();
-  bool started = false;
-  bool stopped = false;
-
-  /// 프레임에 실을 신뢰도.
-  ///
-  /// 기본값은 실기기와 같다. `OnDeviceLandmarkSource`는 신뢰도를 **측정하지
-  /// 못하면서도** `minHandDetectionConfidence`(0.6)를 하한값으로 채워 넣는다.
-  /// 이 값을 null로 두면 실기기에서만 터지는 경로를 테스트가 못 본다.
-  double? detectionScore = 0.6;
-
-  /// [detectionScore]가 **측정된** 값인지. false면 하한값일 뿐이다.
-  bool scoreIsMeasured = false;
-
-  @override
-  bool get providesDetectionScore => scoreIsMeasured;
-
-  @override
-  Stream<HandFrame> get frames => _controller.stream;
-
-  @override
-  CameraInfo? get imageSize => const CameraInfo(width: 720, height: 1280);
-
-  @override
-  Widget? buildPreview() => null;
-
-  @override
-  LandmarkTransform get transform => const LandmarkTransform();
-
-  @override
-  Future<void> start() async => started = true;
-
-  @override
-  Future<void> stop() async => stopped = true;
-
-  @override
-  void resetClock() {}
-
-  @override
-  void dispose() => _controller.close();
-
-  /// 정규화 좌표계(0~1)에 얹은 손 하나를 흘린다.
-  void emitHand(Coords hand, {int tMs = 0}) {
-    _controller.add(HandFrame(
-      tMs: tMs,
-      landmarks: <Landmark>[
-        for (final List<double> p in hand)
-          // 손 모델은 원점 근처의 ±1 좌표다. 화면 한가운데로 옮기고 줄인다.
-          Landmark(0.5 + p[0] * 0.12, 0.5 + p[1] * 0.12, p[2] * 0.12),
-      ],
-      score: detectionScore,
-    ));
-  }
-
-  /// 손이 (dx, dy)만큼 옮겨간 프레임.
-  void emitMovedHand(Coords hand, double dx, double dy, {int tMs = 0}) {
-    emitHand(
-      <List<double>>[
-        for (final List<double> p in hand) <double>[p[0] + dx, p[1] + dy, p[2]],
-      ],
-      tMs: tMs,
-    );
-  }
-}
+import 'session_harness.dart';
 
 void main() {
   late ScriptedSource source;
   late ProviderContainer container;
   late ChallengeConfig config;
+  late PassingApi api;
 
   setUp(() {
     source = ScriptedSource();
@@ -107,21 +32,9 @@ void main() {
     // 시간은 실제 시간을 그대로 기다리므로, 켜 두면 3단계에 10초 넘게 걸려
     // 전체 테스트가 붙어 돌 때 불안정해진다. 그 규칙은 step_result_test.dart와
     // step_prepare_test.dart가 따로 본다. 여기서는 짧게 한 번만 확인한다.
-    config = configWith(<String, dynamic>{
-      'timing': <String, dynamic>{
-        'perActionTimeoutMs': 4000,
-        'totalTimeoutMs': 30000,
-        'maxRetries': 0,
-        'stepPrepareMs': 0,
-        'stepResultHoldMs': 0,
-      },
-    });
-    container = ProviderContainer(
-      overrides: [
-        landmarkSourceProvider.overrideWithValue(source),
-        serverConfigProvider.overrideWith(() => _StubConfig(config)),
-      ],
-    );
+    config = flowConfig();
+    api = PassingApi();
+    container = sessionContainer(source, config, api);
   });
 
   tearDown(() {
@@ -129,10 +42,10 @@ void main() {
     source.dispose();
   });
 
-  ChallengeController controller() =>
-      container.read(challengeControllerProvider.notifier);
+  AuthSessionController controller() =>
+      container.read(authSessionProvider.notifier);
 
-  ChallengeFlowState flow() => container.read(challengeControllerProvider);
+  AuthSessionState flow() => container.read(authSessionProvider);
 
   /// 한 프레임 간격. 상태 머신은 **실제 경과 시간**으로 판정하므로
   /// (컨트롤러가 자기 시계를 쓴다) 테스트도 실시간으로 흘려야 한다.
@@ -193,9 +106,9 @@ void main() {
   }
 
   test('Challenge 전체를 끝까지 통과한다', () async {
-    await controller().begin();
+    await startSession(container);
     expect(source.started, isTrue);
-    expect(flow().phase, ChallengePhase.running);
+    expect(flow().phase, SessionPhase.challenge);
     expect(flow().actions.length, 3);
 
     for (final String action in flow().actions) {
@@ -212,17 +125,19 @@ void main() {
     }
 
     // 마지막 단계 PASS 표시가 끝나야 통과로 확정된다.
+    // 마지막 단계 PASS 표시가 끝나면 **카메라를 놓지 않고** 제스처 수집으로
+    // 이어진다. 손을 계속 보여줘야 세션이 끊기지 않는다.
     final Coords wait = sketchForShape('OPEN_PALM', config).landmarks;
     final Stopwatch clock = Stopwatch()..start();
     int i = 0;
-    while (flow().phase == ChallengePhase.running &&
-        clock.elapsed < const Duration(seconds: 6)) {
+    while (!flow().finished && clock.elapsed < const Duration(seconds: 15)) {
       source.emitHand(wait, tMs: 9000 + i++ * 20);
       await Future<void>.delayed(frameGap);
     }
 
-    expect(flow().phase, ChallengePhase.passed,
-        reason: '요청: ${flow().actions}, 사유: ${flow().status?.failReason}');
+    expect(flow().phase, SessionPhase.done,
+        reason: '요청: ${flow().actions}, 단계: ${flow().stepIndex}, '
+            '사유: ${flow().status?.failReason}, 안내: ${flow().notice}');
     expect(flow().status!.steps.every((StepResult s) => s.passed), isTrue);
     // 통과하면 카메라를 놓는다.
     expect(source.stopped, isTrue);
@@ -230,41 +145,31 @@ void main() {
 
   test('손을 들지 않아도 바로 끝나지 않는다 (대기 단계)', () async {
     // 화면이 뜨자마자 판정이 시작되면 손을 들기도 전에 끝난다.
-    await controller().begin();
+    await startSession(container);
     await Future<void>.delayed(const Duration(milliseconds: 2500));
 
-    expect(flow().phase, ChallengePhase.running);
+    expect(flow().phase, SessionPhase.challenge);
     expect(flow().status!.state, ChallengeState.waitHand);
     expect(flow().status!.awaitingHand, isTrue);
   });
 
   test('대기 제한(안전장치)까지 지나면 HAND_NOT_FOUND', () async {
-    config = configWith(<String, dynamic>{
-      'timing': <String, dynamic>{
-        'perActionTimeoutMs': 4000,
-        'totalTimeoutMs': 30000,
-        'maxRetries': 0,
-        'waitHandTimeoutMs': 800,
-      },
+    config = flowConfig(<String, dynamic>{
+      'timing': <String, dynamic>{'waitHandTimeoutMs': 800},
     });
-    final ProviderContainer short = ProviderContainer(
-      overrides: [
-        landmarkSourceProvider.overrideWithValue(source),
-        serverConfigProvider.overrideWith(() => _StubConfig(config)),
-      ],
-    );
+    final ProviderContainer short = sessionContainer(source, config, api);
     addTearDown(short.dispose);
 
-    await short.read(challengeControllerProvider.notifier).begin();
+    await startSession(short);
     await Future<void>.delayed(const Duration(milliseconds: 1500));
 
-    final ChallengeFlowState state = short.read(challengeControllerProvider);
-    expect(state.phase, ChallengePhase.failed);
+    final AuthSessionState state = short.read(authSessionProvider);
+    expect(state.phase, SessionPhase.failed);
     expect(state.status!.failReason, FailReason.handNotFound);
   });
 
   test('요청과 다른 손 모양만 하면 실패한다', () async {
-    await controller().begin();
+    await startSession(container);
     final String first = flow().actions.first;
     // 요청이 손 모양일 때만 의미가 있는 시나리오다.
     if (!kShapePatterns.containsKey(first)) return;
@@ -276,7 +181,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 12));
     }
 
-    expect(flow().phase, ChallengePhase.failed);
+    expect(flow().phase, SessionPhase.failed);
     expect(
       flow().status!.failReason,
       anyOf(FailReason.wrongShape, FailReason.wrongOrder,
@@ -285,38 +190,28 @@ void main() {
   });
 
   test('설정을 못 받으면 시작하지 않는다', () async {
-    final ProviderContainer bare = ProviderContainer(
-      overrides: [
-        landmarkSourceProvider.overrideWithValue(source),
-        serverConfigProvider.overrideWith(() => _StubConfig(null)),
-      ],
-    );
+    final ProviderContainer bare = sessionContainer(source, null, api);
     addTearDown(bare.dispose);
 
-    await bare.read(challengeControllerProvider.notifier).begin();
-    final ChallengeFlowState state = bare.read(challengeControllerProvider);
+    await startSession(bare);
+    final AuthSessionState state = bare.read(authSessionProvider);
 
-    expect(state.phase, ChallengePhase.unavailable);
+    expect(state.phase, SessionPhase.unavailable);
     expect(state.notice, contains('Challenge 설정'));
     // 임계값을 추측해서 진행하지 않는다.
     expect(source.started, isFalse);
   });
 
   test('angleSpace가 world면 막는다 (플러그인이 world 좌표를 주지 않는다)', () async {
-    final ProviderContainer worldContainer = ProviderContainer(
-      overrides: [
-        landmarkSourceProvider.overrideWithValue(source),
-        serverConfigProvider.overrideWith(
-          () => _StubConfig(configWith(<String, dynamic>{'angleSpace': 'world'})),
-        ),
-      ],
-    );
+    final ProviderContainer worldContainer = sessionContainer(source,
+        configWith(<String, dynamic>{'angleSpace': 'world'}),
+        api,);
     addTearDown(worldContainer.dispose);
 
-    await worldContainer.read(challengeControllerProvider.notifier).begin();
+    await startSession(worldContainer);
     expect(
-      worldContainer.read(challengeControllerProvider).phase,
-      ChallengePhase.unavailable,
+      worldContainer.read(authSessionProvider).phase,
+      SessionPhase.unavailable,
     );
     expect(source.started, isFalse);
   });
@@ -324,49 +219,39 @@ void main() {
   test('결과 표시와 준비 시간을 지나 통과까지 간다', () async {
     // 표시 시간을 짧게 켜고 한 단계만 돌린다. 컨트롤러가 이 구간에서
     // 멈추지 않고 끝까지 가는지 본다.
-    config = configWith(<String, dynamic>{
+    config = flowConfig(<String, dynamic>{
       'steps': <String, dynamic>{'numShapes': 1, 'numMoves': 0},
-      'timing': <String, dynamic>{
-        'perActionTimeoutMs': 4000,
-        'totalTimeoutMs': 30000,
-        'maxRetries': 0,
-        'stepPrepareMs': 200,
-        'stepResultHoldMs': 200,
-      },
+      'timing': <String, dynamic>{'stepPrepareMs': 200, 'stepResultHoldMs': 200},
     });
-    final ProviderContainer short = ProviderContainer(
-      overrides: [
-        landmarkSourceProvider.overrideWithValue(source),
-        serverConfigProvider.overrideWith(() => _StubConfig(config)),
-      ],
-    );
+    final ProviderContainer short = sessionContainer(source, config, api);
     addTearDown(short.dispose);
 
-    await short.read(challengeControllerProvider.notifier).begin();
-    ChallengeFlowState st() => short.read(challengeControllerProvider);
+    await startSession(short);
+    AuthSessionState st() => short.read(authSessionProvider);
     expect(st().actions.length, 1);
 
     final Coords hand = sketchForShape(st().actions.first, config).landmarks;
     bool sawResult = false;
     final Stopwatch clock = Stopwatch()..start();
     int i = 0;
-    while (st().phase == ChallengePhase.running &&
-        clock.elapsed < const Duration(seconds: 8)) {
+    // PASS 표시가 끝나도 카메라를 놓지 않고 제스처 수집으로 이어진다.
+    // 세션이 끝날 때까지 손을 계속 보여준다.
+    while (!st().finished && clock.elapsed < const Duration(seconds: 15)) {
       source.emitHand(hand, tMs: i++ * 20);
       await Future<void>.delayed(frameGap);
       if (st().status?.stepResult != null) sawResult = true;
     }
 
     expect(sawResult, isTrue, reason: 'PASS 표시를 거치지 않았다');
-    expect(st().phase, ChallengePhase.passed);
+    expect(st().phase, SessionPhase.done);
   });
 
   test('취소하면 카메라를 놓고 상태를 되돌린다', () async {
-    await controller().begin();
-    expect(flow().phase, ChallengePhase.running);
+    await startSession(container);
+    expect(flow().phase, SessionPhase.challenge);
 
     controller().cancel();
-    expect(flow().phase, ChallengePhase.idle);
+    expect(flow().phase, SessionPhase.idle);
     expect(source.stopped, isTrue);
   });
 
@@ -381,7 +266,7 @@ void main() {
   test('신뢰도 하한값(0.6)만 있는 소스에서도 끝까지 돈다', () async {
     source.detectionScore = 0.6; // 실기기와 같은 조건
 
-    await controller().begin();
+    await startSession(container);
     for (final String action in flow().actions) {
       final Status? status = flow().status;
       if (status != null && status.awaitingEscape) {
@@ -401,15 +286,16 @@ void main() {
     );
 
     // 마지막 단계 PASS 표시가 끝나야 통과로 확정된다.
+    // 마지막 단계 PASS 표시가 끝나면 **카메라를 놓지 않고** 제스처 수집으로
+    // 이어진다. 손을 계속 보여줘야 세션이 끊기지 않는다.
     final Coords wait = sketchForShape('OPEN_PALM', config).landmarks;
     final Stopwatch clock = Stopwatch()..start();
     int i = 0;
-    while (flow().phase == ChallengePhase.running &&
-        clock.elapsed < const Duration(seconds: 6)) {
+    while (!flow().finished && clock.elapsed < const Duration(seconds: 15)) {
       source.emitHand(wait, tMs: 9000 + i++ * 20);
       await Future<void>.delayed(frameGap);
     }
-    expect(flow().phase, ChallengePhase.passed);
+    expect(flow().phase, SessionPhase.done);
   });
 
   test('진짜로 측정된 낮은 신뢰도는 여전히 거른다', () async {
@@ -418,7 +304,7 @@ void main() {
     source.detectionScore = 0.5;
     source.scoreIsMeasured = true;
 
-    await controller().begin();
+    await startSession(container);
     final String first = flow().actions.first;
     final Coords hand =
         sketchForShape(kShapePatterns.containsKey(first) ? first : 'OPEN_PALM',
@@ -440,20 +326,119 @@ void main() {
       reason: '${clock.elapsedMilliseconds}ms, $i프레임 뒤 상태=${flow().phase}',
     );
   });
-}
 
-/// 서버 왕복 없이 설정을 주입한다.
-class _StubConfig extends ServerConfigController {
-  final ChallengeConfig? challenge;
+  // ─── 연속 세션 ──────────────────────────────────────────────────
+  //
+  // Challenge와 제스처 인증을 한 번의 촬영으로 묶는 것이 이번 구조의 목적이다.
+  // 촬영을 둘로 나누면 "Challenge는 본인 손, 인증은 피해자 영상"을 막지 못한다.
 
-  _StubConfig(this.challenge);
+  /// 한 단계짜리 Challenge 설정. 여기서 보는 것은 단계 규칙이 아니라
+  /// **Challenge에서 수집으로 넘어가는 이음매**라 짧을수록 좋다.
+  ChallengeConfig oneStep([Map<String, dynamic> extra = const {}]) =>
+      flowConfig(deepMergeMaps(<String, dynamic>{
+        'steps': <String, dynamic>{'numShapes': 1, 'numMoves': 0},
+      }, extra));
 
-  @override
-  ServerConfigState build() => ServerConfigState(
-        config: ServerConfig.fallback.copyWithChallenge(challenge),
-        loaded: true,
-      );
+  /// Challenge를 통과시켜 제스처 수집까지 끌고 간다. 마지막으로 흘린 tMs를 준다.
+  Future<int> runToRecording(ProviderContainer c) async {
+    AuthSessionState st() => c.read(authSessionProvider);
+    await startSession(c);
+    final Coords hand = sketchForShape(st().actions.first, config).landmarks;
+    final Stopwatch clock = Stopwatch()..start();
+    int i = 0;
+    while (st().phase == SessionPhase.challenge &&
+        clock.elapsed < const Duration(seconds: 10)) {
+      source.emitHand(hand, tMs: i++ * 20);
+      await Future<void>.delayed(frameGap);
+    }
+    expect(st().phase, SessionPhase.recording,
+        reason: 'Challenge에서 수집으로 이어지지 않았다 (${st().notice})');
+    return i * 20;
+  }
 
-  @override
-  Future<void> load() async {}
+  /// 세션이 끝날 때까지 기다린다. [hand]가 있으면 계속 흘린다.
+  Future<void> drain(ProviderContainer c, {Coords? hand, int fromTMs = 0}) async {
+    AuthSessionState st() => c.read(authSessionProvider);
+    final Stopwatch clock = Stopwatch()..start();
+    int t = fromTMs;
+    while (!st().finished && clock.elapsed < const Duration(seconds: 20)) {
+      if (hand != null) source.emitHand(hand, tMs: t += 20);
+      await Future<void>.delayed(frameGap);
+    }
+  }
+
+  test('한 번 잡은 카메라로 Challenge와 수집을 이어서 한다', () async {
+    // 화면을 옮기며 stop/start 하면 그 사이가 비고, 구독이 누수되어 프레임이
+    // 두 배로 수집되는 문제도 거기서 났다.
+    config = oneStep();
+    final ProviderContainer c = sessionContainer(source, config, api);
+    addTearDown(c.dispose);
+    AuthSessionState st() => c.read(authSessionProvider);
+
+    final int t = await runToRecording(c);
+    expect(source.startCount, 1);
+    // begin()이 이전 시도를 한 번 정리한다. 그 뒤로는 세션이 끝날 때까지
+    // 카메라를 놓지 않아야 한다.
+    expect(source.stopCount, 1, reason: 'Challenge 끝에 카메라를 놓았다');
+
+    await drain(c,
+        hand: sketchForShape('OPEN_PALM', config).landmarks, fromTMs: t);
+
+    expect(st().phase, SessionPhase.done, reason: st().notice ?? '');
+    expect(api.verifyCalls, 1);
+    expect(api.lastRequest!.frames.length,
+        greaterThanOrEqualTo(kMinFramesForVerify));
+    expect(source.startCount, 1, reason: '수집을 시작하며 카메라를 다시 잡았다');
+    expect(source.stopCount, 2, reason: '끝나고도 카메라를 놓지 않았다');
+  });
+
+  test('제스처 수집 중에 손이 사라지면 세션이 끊긴다', () async {
+    // 여기가 "Challenge는 본인 손, 인증은 피해자 영상"의 자리다.
+    config = oneStep(<String, dynamic>{
+      'tracking': <String, dynamic>{'maxLostFrames': 3},
+    });
+    // 손이 사라진 것을 알아채기 전에 수집이 끝나버리면 이 테스트가 의미 없다.
+    final ProviderContainer c =
+        sessionContainer(source, config, api, captureMs: 6000);
+    addTearDown(c.dispose);
+    AuthSessionState st() => c.read(authSessionProvider);
+
+    await runToRecording(c);
+    await drain(c); // 손을 뺀다
+
+    expect(st().phase, SessionPhase.failed);
+    // 수집 구간은 상태 머신이 돌지 않는다. 사유는 안내 문구로 나간다.
+    expect(st().notice, contains('손이 화면에서 벗어났습니다'));
+    expect(api.verifyCalls, 0, reason: '끊긴 세션을 서버로 보냈다');
+  });
+
+  test('PASS 표시 구간에 손이 사라져도 세션이 끊긴다', () async {
+    // 통과 표시를 본 사용자가 손을 내리는 순간이 가장 위험하다.
+    config = oneStep(<String, dynamic>{
+      'timing': <String, dynamic>{'stepResultHoldMs': 3000},
+      'tracking': <String, dynamic>{'maxLostFrames': 3},
+    });
+    final ProviderContainer c = sessionContainer(source, config, api);
+    addTearDown(c.dispose);
+    AuthSessionState st() => c.read(authSessionProvider);
+    await startSession(c);
+
+    final Coords hand = sketchForShape(st().actions.first, config).landmarks;
+    final Stopwatch clock = Stopwatch()..start();
+    int i = 0;
+    while (st().status?.stepResult == null &&
+        clock.elapsed < const Duration(seconds: 10)) {
+      source.emitHand(hand, tMs: i++ * 20);
+      await Future<void>.delayed(frameGap);
+    }
+    expect(st().status?.stepResult, StepOutcome.pass,
+        reason: 'PASS 표시에 들어가지 못했다');
+
+    // 표시 중에는 판정이 멈춰 있다. 그래도 추적은 살아 있어야 한다.
+    await drain(c);
+
+    expect(st().phase, SessionPhase.failed);
+    expect(st().status?.failReason, FailReason.sessionBroken);
+    expect(api.verifyCalls, 0);
+  });
 }

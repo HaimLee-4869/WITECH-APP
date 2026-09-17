@@ -12,7 +12,8 @@ import '../challenge/challenge_config.dart';
 import '../challenge/challenge_state_machine.dart';
 import '../core/theme.dart';
 import '../models/challenge_messages.dart';
-import '../state/challenge_controller.dart';
+import '../models/verify.dart';
+import '../state/auth_session_controller.dart';
 import '../state/providers.dart';
 import '../widgets/capture_ring.dart';
 import '../widgets/challenge_guide.dart';
@@ -21,10 +22,19 @@ import '../widgets/hand_guide_notice.dart';
 import '../widgets/hand_overlay_painter.dart';
 import '../widgets/primary_button.dart';
 import '../widgets/secondary_button.dart';
-import 'auth_screen.dart';
+import 'result_screen.dart';
 
-/// 검출된 손 모양을 화면에 띄울지. 개발용이라 시연 전에 끈다.
+/// 검출된 손 모양·관문 값을 **화면에** 띄울지. 시연 중에는 끈다.
 const bool kShowChallengeDebug = false;
+
+/// 판정 로그를 **서버로** 보낼지 (`POST /debug/challenge`).
+///
+/// 화면 패널과 따로 둔다. 시연 화면은 깔끔해야 하지만, 로그는 나중에 문제를
+/// 되짚고 **연속성 임계값을 도출하는 근거**라 계속 모아야 한다
+/// (`ContinuityMonitor`의 scaleJump/wristJump 분포).
+///
+/// 전송에 실패해도 인증은 그대로 진행된다(fire and forget).
+const bool kSendChallengeLog = true;
 
 class ChallengeScreen extends ConsumerStatefulWidget {
   const ChallengeScreen({super.key});
@@ -39,7 +49,7 @@ class _ChallengeScreenState extends ConsumerState<ChallengeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      await ref.read(challengeControllerProvider.notifier).begin();
+      await ref.read(authSessionProvider.notifier).begin();
       // 카메라 초기화가 끝나야 buildPreview()가 위젯을 돌려준다.
       if (mounted) setState(() {});
     });
@@ -47,8 +57,8 @@ class _ChallengeScreenState extends ConsumerState<ChallengeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen(challengeControllerProvider.select((s) => s.phase), (_, phase) {
-      if (phase == ChallengePhase.passed) _goToAuth();
+    ref.listen(authSessionProvider.select((s) => s.phase), (_, phase) {
+      if (phase == SessionPhase.done) _goToResult();
     });
 
     return Scaffold(
@@ -67,8 +77,10 @@ class _ChallengeScreenState extends ConsumerState<ChallengeScreen> {
                 child: Text('Sign-ID', style: AppText.displayTitle),
               ),
               const SizedBox(height: 4),
-              const Text('동작 확인', style: AppText.caption),
-              const SizedBox(height: 12),
+              const Text('동작 확인 후 수어 암호', style: AppText.caption),
+              const SizedBox(height: 8),
+              const _KeepHandBanner(),
+              const SizedBox(height: 8),
               const _StepIndicator(),
               const SizedBox(height: 12),
               // 원이 남은 세로 공간을 전부 쓴다. 이동 단계에서 손을 움직일
@@ -102,13 +114,17 @@ class _ChallengeScreenState extends ConsumerState<ChallengeScreen> {
     );
   }
 
-  Future<void> _goToAuth() async {
-    if (!mounted) return;
-    // Challenge 화면을 스택에서 빼고 인증으로 간다. 뒤로 가기로 통과한 Challenge에
-    // 되돌아오면 같은 통과를 다시 쓰게 된다.
-    await Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const AuthScreen()),
+  /// 인증 응답을 받으면 결과 화면으로.
+  ///
+  /// Challenge → 인증으로 **화면이 바뀌지 않는다.** 한 화면 안에서 단계만 바뀐다.
+  /// 화면을 옮기면 카메라가 재생성되어 연속성이 끊긴다.
+  Future<void> _goToResult() async {
+    final VerifyResponse? response = ref.read(authSessionProvider).response;
+    if (response == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => ResultScreen(response: response)),
     );
+    if (mounted) ref.read(authSessionProvider.notifier).cancel();
   }
 }
 
@@ -118,7 +134,7 @@ class _StepIndicator extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
+    final AuthSessionState flow = ref.watch(authSessionProvider);
     final ChallengeConfig? config = ref.watch(
       serverConfigProvider.select((s) => s.config.challenge),
     );
@@ -164,17 +180,19 @@ class _CaptureArea extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
+    final AuthSessionState flow = ref.watch(authSessionProvider);
     final source = ref.watch(landmarkSourceProvider);
 
     return CaptureRing(
       diameter: diameter,
       borderColor: switch (flow.phase) {
-        ChallengePhase.failed || ChallengePhase.unavailable => AppColors.danger,
-        ChallengePhase.passed => AppColors.success,
+        SessionPhase.failed || SessionPhase.unavailable => AppColors.danger,
+        SessionPhase.done => AppColors.success,
+        // 제스처 수집 중에는 촬영 중이라는 뜻으로 민트. 진행률 아크는 보라다.
+        SessionPhase.recording || SessionPhase.uploading => AppColors.ring,
         // 손을 찾는 중에는 아직 준비가 안 됐다는 뜻으로 회색 (인증 화면과 같다)
         // 준비 시간에는 방금 단계를 통과했다는 신호로 초록.
-        ChallengePhase.running => switch (flow.status) {
+        SessionPhase.challenge => switch (flow.status) {
           null => AppColors.textSecondary,
           // 결과 표시가 가장 우선이다. 방금 맞았는지 틀렸는지를 먼저 알려준다.
           final Status s when s.stepResult == StepOutcome.pass =>
@@ -185,16 +203,21 @@ class _CaptureArea extends ConsumerWidget {
           final Status s when s.preparing => AppColors.success,
           _ => AppColors.ring,
         },
-        ChallengePhase.idle => AppColors.textSecondary,
+        SessionPhase.idle => AppColors.textSecondary,
       },
       // 대기 중에는 손이 얼마나 연속으로 잡혔는지, 판정 중에는 손 모양 유지
       // 진행도를 테두리 아크로 보여준다. 얼마나 더 있어야 하는지 모르면
       // 사용자가 손을 먼저 내린다.
-      progress: flow.status == null
-          ? null
-          : (flow.status!.awaitingHand
-              ? flow.status!.handReadyProgress
-              : flow.status!.holdProgress),
+      progress: switch (flow.phase) {
+        // 제스처 수집 중에는 촬영 진행도(보라 아크).
+        SessionPhase.recording => flow.recordProgress,
+        SessionPhase.challenge => flow.status == null
+            ? null
+            : (flow.status!.awaitingHand
+                ? flow.status!.handReadyProgress
+                : flow.status!.holdProgress),
+        _ => null,
+      },
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
@@ -215,7 +238,7 @@ class _Overlay extends ConsumerWidget {
     // 오버레이는 인증 화면과 같은 규칙으로 그린다. 좌표 변환은 소스가 알려준다.
     // 반전은 화면 전용이다. 판정에 들어가는 좌표는 원본이다.
     final frame =
-        ref.watch(challengeControllerProvider.select((s) => s.latestFrame));
+        ref.watch(authSessionProvider.select((s) => s.latestFrame));
     final transform = ref.watch(landmarkSourceProvider).transform;
 
     return CustomPaint(
@@ -236,7 +259,7 @@ class _TimeBar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final Status? status =
-        ref.watch(challengeControllerProvider.select((s) => s.status));
+        ref.watch(authSessionProvider.select((s) => s.status));
     final ChallengeConfig? config = ref.watch(
       serverConfigProvider.select((s) => s.config.challenge),
     );
@@ -294,20 +317,26 @@ class _Prompt extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
+    final AuthSessionState flow = ref.watch(authSessionProvider);
 
     final (String text, Color color) = switch (flow.phase) {
-      ChallengePhase.unavailable => (
+      SessionPhase.unavailable => (
           flow.notice ?? '동작 확인을 시작할 수 없습니다.',
           AppColors.danger,
         ),
-      ChallengePhase.failed => (
+      SessionPhase.failed => (
           challengeFailMessage(flow.status?.failReason),
           AppColors.danger,
         ),
-      ChallengePhase.passed => ('동작 확인 완료', AppColors.success),
-      ChallengePhase.idle => ('준비 중입니다…', AppColors.textSecondary),
-      ChallengePhase.running => (
+      SessionPhase.done => ('인증 요청을 보냈습니다', AppColors.success),
+      SessionPhase.idle => ('준비 중입니다…', AppColors.textSecondary),
+      // 여기서 손을 내리면 세션이 끊긴다. 계속 붙잡아 둬야 한다.
+      SessionPhase.recording => (
+          '수어 암호를 수행하세요',
+          AppColors.textPrimary,
+        ),
+      SessionPhase.uploading => ('확인 중입니다…', AppColors.textSecondary),
+      SessionPhase.challenge => (
           flow.status == null
               ? '손을 원 안에 위치시켜 주세요'
               : challengePrompt(flow.status!),
@@ -338,7 +367,7 @@ class _DebugLine extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
+    final AuthSessionState flow = ref.watch(authSessionProvider);
     final ChallengeConfig? config = ref.watch(
       serverConfigProvider.select((s) => s.config.challenge),
     );
@@ -386,12 +415,12 @@ class _Actions extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
-    final ChallengeController controller =
-        ref.read(challengeControllerProvider.notifier);
+    final AuthSessionState flow = ref.watch(authSessionProvider);
+    final AuthSessionController controller =
+        ref.read(authSessionProvider.notifier);
 
     final bool canRetry =
-        flow.phase == ChallengePhase.failed && flow.retriesLeft > 0;
+        flow.phase == SessionPhase.failed && flow.retriesLeft > 0;
 
     return Column(
       children: <Widget>[
@@ -400,7 +429,7 @@ class _Actions extends ConsumerWidget {
             label: '다시 시도 (${flow.retriesLeft}회 남음)',
             onPressed: controller.retry,
           ),
-        if (flow.phase == ChallengePhase.failed && !canRetry)
+        if (flow.phase == SessionPhase.failed && !canRetry)
           Text(
             '재시도 횟수를 모두 사용했습니다.',
             textAlign: TextAlign.center,
@@ -428,12 +457,12 @@ class _ResultBadge extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
+    final AuthSessionState flow = ref.watch(authSessionProvider);
     final Status? status = flow.status;
 
     final (bool pass, FailReason? reason)? shown = switch (flow.phase) {
-      ChallengePhase.passed => (true, null),
-      ChallengePhase.failed => (false, status?.failReason),
+      SessionPhase.done => (true, null),
+      SessionPhase.failed => (false, status?.failReason),
       _ => switch (status?.stepResult) {
         StepOutcome.pass => (true, null),
         StepOutcome.fail => (false, status?.stepResultReason),
@@ -473,6 +502,56 @@ class _ResultBadge extends ConsumerWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// "손을 유지하세요" 안내.
+///
+/// 연속 세션이라 손이 한 번이라도 사라지면 전체가 실패한다. 사람은 통과 표시를
+/// 보면 손을 내리게 돼 있어서, 작은 글씨로는 부족하다. 세션 내내 눈에 띄게 둔다.
+class _KeepHandBanner extends ConsumerWidget {
+  const _KeepHandBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AuthSessionState flow = ref.watch(authSessionProvider);
+    if (flow.finished) return const SizedBox.shrink();
+
+    // 손을 아직 안 들었으면 "들어주세요"가 먼저다. 들고 나면 "유지하세요".
+    final bool keeping = flow.mustKeepHand;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: (keeping ? AppColors.ring : AppColors.surfaceAlt)
+            .withValues(alpha: keeping ? 0.18 : 1.0),
+        border: Border.all(
+          color: keeping ? AppColors.ring : AppColors.divider,
+        ),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: <Widget>[
+          Icon(
+            keeping ? Icons.pan_tool_outlined : Icons.front_hand_outlined,
+            size: 20,
+            color: keeping ? AppColors.ring : AppColors.textSecondary,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              keeping
+                  ? challengeKeepHandNotice
+                  : '손을 원 안에 올리면 시작합니다',
+              style: AppText.body.copyWith(
+                color: keeping ? AppColors.textPrimary : AppColors.textSecondary,
+                fontWeight: keeping ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
