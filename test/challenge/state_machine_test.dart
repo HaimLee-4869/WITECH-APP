@@ -37,8 +37,10 @@ ChallengeConfig smConfig([Map<String, dynamic> overrides = const {}]) =>
         'perActionTimeoutMs': 2000,
         'totalTimeoutMs': 9000,
         'maxRetries': 0,
-        // 이 파일은 판정 규칙을 본다. 대기 단계는 wait_hand_test.dart에서 따로 본다.
+        // 이 파일은 판정 규칙을 본다. 대기 단계와 준비 시간은 각각
+        // wait_hand_test.dart, step_prepare_test.dart에서 따로 본다.
         'waitHandReadyMs': 0,
+        'stepPrepareMs': 0,
       },
       'tracking': <String, dynamic>{'maxLostFrames': 5, 'minDetectionScore': 0.5},
     }, overrides));

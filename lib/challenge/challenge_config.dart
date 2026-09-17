@@ -112,12 +112,19 @@ class TimingConfig {
   /// 판정 제한이 아니라 화면이 영원히 멈춰 있지 않게 하는 안전장치다.
   final double waitHandTimeoutMs;
 
+  /// 단계가 넘어간 뒤 다음 판정을 시작하기까지 주는 시간.
+  ///
+  /// 요청 동작 그림을 보고 손을 준비할 시간이다. **이 동안에는
+  /// [perActionTimeoutMs]가 흐르지 않는다.** 0이면 바로 다음 판정으로 간다.
+  final double stepPrepareMs;
+
   const TimingConfig({
     required this.perActionTimeoutMs,
     required this.totalTimeoutMs,
     required this.maxRetries,
     required this.waitHandReadyMs,
     required this.waitHandTimeoutMs,
+    required this.stepPrepareMs,
   });
 
   factory TimingConfig.fromJson(Map<String, dynamic> json) => TimingConfig(
@@ -128,6 +135,8 @@ class TimingConfig {
         waitHandReadyMs: (json['waitHandReadyMs'] as num?)?.toDouble() ?? 0.0,
         waitHandTimeoutMs:
             (json['waitHandTimeoutMs'] as num?)?.toDouble() ?? 15000.0,
+        // 설정에 없으면 대기 없음(옛 동작). 서버는 항상 값을 준다.
+        stepPrepareMs: (json['stepPrepareMs'] as num?)?.toDouble() ?? 0.0,
       );
 }
 

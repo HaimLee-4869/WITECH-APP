@@ -13,7 +13,7 @@ import 'package:signid/widgets/capture_ring.dart';
 ///
 /// [Canvas]는 상속할 수 없어 인터페이스만 구현하고 나머지 호출은 흘려보낸다.
 /// 여기서는 어떤 색으로 그렸는지만 보면 된다.
-class _ColorRecorder implements Canvas {
+class ColorRecorder implements Canvas {
   final List<Color> arcColors = <Color>[];
   final List<Color> circleColors = <Color>[];
 
@@ -37,8 +37,8 @@ int argb(Color c) => c.toARGB32();
 List<int> argbOf(List<Color> colors) =>
     <int>[for (final Color c in colors) argb(c)];
 
-_ColorRecorder paintRing({required Color borderColor, double? progress}) {
-  final _ColorRecorder canvas = _ColorRecorder();
+ColorRecorder paintRing({required Color borderColor, double? progress}) {
+  final ColorRecorder canvas = ColorRecorder();
   ringPainterForTest(color: borderColor, progress: progress)
       .paint(canvas, const Size(240, 240));
   return canvas;
@@ -46,7 +46,7 @@ _ColorRecorder paintRing({required Color borderColor, double? progress}) {
 
 void main() {
   test('진행률 아크는 보라다 (상태 색이 아니다)', () {
-    final _ColorRecorder c =
+    final ColorRecorder c =
         paintRing(borderColor: AppColors.ring, progress: 0.5);
     expect(argbOf(c.arcColors), contains(argb(AppColors.progress)));
     expect(argbOf(c.arcColors), isNot(contains(argb(AppColors.ring))));
@@ -54,7 +54,7 @@ void main() {
 
   test('상태 색은 그대로 쓴다 (바탕 원)', () {
     // 테두리 상태(탐색/준비/성공/실패)는 계속 보여야 한다.
-    final _ColorRecorder c =
+    final ColorRecorder c =
         paintRing(borderColor: AppColors.ring, progress: 0.5);
     // 바탕 원은 상태 색을 흐리게(alpha 0.22) 그리므로 RGB만 본다.
     expect(
@@ -65,7 +65,7 @@ void main() {
   });
 
   test('진행률이 없으면 상태 색 원만 그린다', () {
-    final _ColorRecorder c = paintRing(borderColor: AppColors.textSecondary);
+    final ColorRecorder c = paintRing(borderColor: AppColors.textSecondary);
     expect(c.arcColors, isEmpty);
     expect(argbOf(c.circleColors), <int>[argb(AppColors.textSecondary)]);
   });

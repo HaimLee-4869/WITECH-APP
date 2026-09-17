@@ -43,6 +43,13 @@ String challengeActionLabel(String action) => switch (action) {
 
 /// 지금 화면에 띄울 한 줄. 상태에 따라 사용자가 할 일이 다르다.
 String challengePrompt(Status status) {
+  if (status.preparing) {
+    // 방금 뭘 했는지 알려주고, 다음 동작을 준비할 시간을 준다.
+    final int? done = status.justPassedStep;
+    final String head = done == null ? '' : '${done + 1}단계 완료  ·  ';
+    final String? next = status.currentAction;
+    return next == null ? head : '$head다음: ${challengeActionLabel(next)}';
+  }
   if (status.awaitingHand) {
     // 손을 들기 전까지는 제한 시간이 흐르지 않는다. 인증 화면과 같은 문구를 쓴다.
     return '손을 원 안에 위치시켜 주세요';

@@ -149,20 +149,26 @@ void main() {
     final double sign = config.coordinateFrame == 'mirrored' ? -1.0 : 1.0;
     final ({double dx, double dy})? dir = isShape ? null : arrowFor(action);
 
-    for (int i = 0; i < maxFrames; i++) {
+    // 준비 시간(stepPrepareMs) 동안에는 판정이 돌지 않는다. 그 프레임은 한도에
+    // 넣지 않는다 — 실제 사용자도 그림을 보며 기다린다.
+    int used = 0;
+    int i = 0;
+    while (used < maxFrames) {
       if (isShape) {
         source.emitHand(hand, tMs: i * 20);
       } else {
         // 한 방향으로 등속. 되돌아오면 그 구간이 반대 방향으로 잡힌다.
         source.emitMovedHand(
           hand,
-          dir!.dx * sign * i * 0.15,
-          dir.dy * i * 0.15,
+          dir!.dx * sign * used * 0.15,
+          dir.dy * used * 0.15,
           tMs: i * 20,
         );
       }
+      i++;
       await Future<void>.delayed(frameGap);
       if (flow().finished || flow().stepIndex != before) return;
+      if (!(flow().status?.preparing ?? false)) used++;
     }
   }
 

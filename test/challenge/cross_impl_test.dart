@@ -190,14 +190,32 @@ void main() {
       test(c['name'] as String, () {
         final List<String> actions =
             (c['actions'] as List<dynamic>).cast<String>();
+
+        // 케이스가 설정을 덮어쓰면 파이썬과 같은 설정으로 돌려야 한다.
+        ChallengeConfig caseConfig = config;
+        final Map<String, dynamic>? override =
+            c['config'] as Map<String, dynamic>?;
+        if (override != null) {
+          final Map<String, dynamic> base =
+              Map<String, dynamic>.of(golden['config'] as Map<String, dynamic>);
+          final Map<String, dynamic> timing = Map<String, dynamic>.of(
+            base['timing'] as Map<String, dynamic>,
+          );
+          (override['timing'] as Map<String, dynamic>?)?.forEach(
+            (String k, dynamic v) => timing[_camel(k)] = v,
+          );
+          base['timing'] = timing;
+          caseConfig = ChallengeConfig.fromJson(base);
+        }
+
         final ChallengeStateMachine machine = ChallengeStateMachine(
-          config: config,
+          config: caseConfig,
           challenge: Challenge(
             challengeId: 'golden',
             actions: actions,
             createdAt: DateTime.utc(2026),
-            shapePool: config.shapePool,
-            movePool: config.movePool,
+            shapePool: caseConfig.shapePool,
+            movePool: caseConfig.movePool,
           ),
           fps: fps,
         );
@@ -277,3 +295,11 @@ String _stateCode(ChallengeState state) => switch (state) {
       ChallengeState.passed => 'PASS',
       ChallengeState.failed => 'FAIL',
     };
+
+/// 골든의 설정 덮어쓰기는 파이썬 키 이름(snake_case)이다.
+String _camel(String snake) {
+  final List<String> parts = snake.split('_');
+  return parts.first +
+      parts.skip(1).map((String p) =>
+          p.isEmpty ? p : p[0].toUpperCase() + p.substring(1)).join();
+}

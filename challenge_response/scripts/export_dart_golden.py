@@ -307,6 +307,16 @@ def sequence_cases():
          "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
          "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": 20,
                      "score": 0.3}]},
+        # --- 단계 준비 시간 (2026-09-18) ---
+        # 단계가 넘어간 뒤 다음 판정까지 여유를 준다. 이 동안에는 제한 시간이
+        # 흐르지 않아야 한다. 준비 시간이 제한 시간을 먹으면 바로 타임아웃이 난다.
+        {"name": "prepare_time_does_not_consume_timeout",
+         "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
+         "config": {"timing": {"step_prepare_ms": 1500}},
+         "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": hold},
+                    # 준비 시간(1500ms)보다 오래 아무것도 안 해도 살아 있어야 한다
+                    {"kind": "shape", "label": "OPEN_PALM", "frames": 70},
+                    {"kind": "shape", "label": "FIST", "frames": ESCAPE + hold}]},
         {"name": "score_at_threshold_passes",
          "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
          "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": hold,
@@ -315,7 +325,12 @@ def sequence_cases():
 
     out = []
     for case in cases:
-        machine, status = run_script(case["actions"], case["script"])
+        # 케이스가 설정을 덮어쓰면 Dart도 같은 설정으로 돌려야 한다.
+        override = case.get("config")
+        cfg = CONFIG
+        if override:
+            cfg = {**CONFIG, "timing": {**CONFIG["timing"], **override.get("timing", {})}}
+        machine, status = run_script(case["actions"], case["script"], cfg)
         out.append({**case,
                     "state": status.state.value,
                     "failReason": status.fail_reason.value if status.fail_reason else None,

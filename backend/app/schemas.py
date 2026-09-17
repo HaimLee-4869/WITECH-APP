@@ -200,6 +200,13 @@ class ChallengeTimingOut(ResponseModel):
     # 영원히 멈춰 있지 않게 하는 안전장치다.
     wait_hand_timeout_ms: float = Field(default=15000.0, gt=0.0, le=120000.0)
 
+    # 단계가 넘어간 뒤 다음 판정을 시작하기까지 주는 시간.
+    #
+    # 요청 동작 그림을 보고 손을 준비할 시간이다. 이 동안에는 perActionTimeoutMs가
+    # 흐르지 않는다. 실기기에서 각 단계가 순식간에 지나가 무엇을 했는지 인지가
+    # 안 된다는 피드백으로 넣었다. 0이면 바로 다음 판정으로 간다.
+    step_prepare_ms: float = Field(default=1500.0, ge=0.0, le=10000.0)
+
 
 class ChallengeTrackingOut(ResponseModel):
     max_lost_frames: int = Field(ge=1, le=300)

@@ -1373,6 +1373,44 @@
       ]
     },
     {
+      "name": "prepare_time_does_not_consume_timeout",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "config": {
+        "timing": {
+          "step_prepare_ms": 1500
+        }
+      },
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5
+        },
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 70
+        },
+        {
+          "kind": "shape",
+          "label": "FIST",
+          "frames": 9
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 2,
+      "stepsPassed": [
+        true,
+        true,
+        false
+      ]
+    },
+    {
       "name": "score_at_threshold_passes",
       "actions": [
         "OPEN_PALM",

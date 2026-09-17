@@ -307,6 +307,9 @@ class Status:
     escape_from: Optional[str] = None        # 벗어나야 하는 이전 손 모양
     escape_progress: float = 1.0             # 0.0~1.0, 1.0이면 관문 열림
     hand_ready_progress: float = 0.0         # WAIT_HAND에서 손이 연속으로 잡힌 정도
+    preparing: bool = False                  # 다음 단계 준비 시간 중인지
+    prepare_remaining_ms: float = 0.0        # 준비 시간이 얼마나 남았는지
+    just_passed_step: Optional[int] = None   # 방금 통과한 단계 번호(0-based)
 
     @property
     def awaiting_escape(self) -> bool:
@@ -343,6 +346,9 @@ class ChallengeStateMachine:
         self.wait_hand_ready_ms = float(timing.get("wait_hand_ready_ms", 0.0))
         # 손을 아예 들지 않을 때 대기를 끝내는 안전장치. 판정 제한이 아니다.
         self.wait_hand_timeout_ms = float(timing.get("wait_hand_timeout_ms", 15000.0))
+        # 단계가 넘어간 뒤 다음 판정을 시작하기까지 주는 시간. 요청 동작을 보고
+        # 손을 준비할 시간이라, 이 동안에는 per_action_timeout_ms가 흐르지 않는다.
+        self.step_prepare_ms = float(timing.get("step_prepare_ms", 0.0))
 
         tracking = config["tracking"]
         self.max_lost_frames = int(tracking["max_lost_frames"])
@@ -380,11 +386,14 @@ class ChallengeStateMachine:
         self._now_ms: float = 0.0
         self._frame_delta_ms: float = 0.0
         self._hand_ready = MsSpan(self.wait_hand_ready_ms)
+        # 다음 단계 준비 시간이 끝나는 시각. None이면 준비 중이 아니다.
+        self._prepare_until_ms: Optional[float] = None
         self._hold = FrameSpan(self.hold_frames, self.reference_fps)
         self._wrong_label: Optional[str] = None
         self._wrong = FrameSpan(self.hold_frames, self.reference_fps)
         # 제한 시간 동안 사용자가 '확실히' 수행한 다른 동작. 타임아웃 때 사유를 정한다.
         self._sustained_wrong: Optional[str] = None
+        self._just_passed_step: Optional[int] = None  # 방금 통과한 단계(화면 표시용)
         self._last_shape: Optional[str] = None    # 마지막으로 검출된 손 모양
         self._escape_from: Optional[str] = None   # 벗어나야 하는 모양
         self._escape = FrameSpan(self.escape_frames, self.reference_fps)
@@ -424,6 +433,17 @@ class ChallengeStateMachine:
             waiting = self._update_wait(obs)
             if waiting is not None:
                 return waiting
+
+        # 다음 단계 준비 시간. 요청 동작을 보고 손을 만들 시간을 준다.
+        # 이 동안에는 단계 제한도 전체 제한도 흐르지 않는다.
+        if self._prepare_until_ms is not None:
+            if obs.timestamp_ms < self._prepare_until_ms:
+                self._step_started_ms = obs.timestamp_ms
+                if self._started_ms is not None:
+                    self._started_ms += self._frame_delta_ms
+                return self._status()
+            self._prepare_until_ms = None
+            self._step_started_ms = obs.timestamp_ms
 
         if obs.timestamp_ms - self._started_ms > self.total_timeout_ms:
             return self._fail(FailReason.TOTAL_TIMEOUT, obs.timestamp_ms)
@@ -632,6 +652,7 @@ class ChallengeStateMachine:
         return set(self.challenge.actions[self.step_index + 1:])
 
     def _advance(self, timestamp_ms: float) -> Status:
+        step_index = self.step_index
         step = self.steps[self.step_index]
         step.passed = True
         step.elapsed_ms = timestamp_ms - self._step_started_ms
@@ -647,6 +668,9 @@ class ChallengeStateMachine:
         else:
             self._step_started_ms = timestamp_ms
             self._arm_escape_gate()
+            if self.step_prepare_ms > 0:
+                self._prepare_until_ms = timestamp_ms + self.step_prepare_ms
+        self._just_passed_step = step_index
         return self._status()
 
     def _fail_step(self, reason: FailReason, timestamp_ms: float) -> Status:
@@ -660,6 +684,7 @@ class ChallengeStateMachine:
             self._wrong.reset()
             self._sustained_wrong = None
             self._window.clear()
+            self._prepare_until_ms = None
             return self._status()
         return self._fail(reason, timestamp_ms)
 
@@ -696,4 +721,10 @@ class ChallengeStateMachine:
             escape_from=self._escape_from if self._escape_pending() else None,
             escape_progress=self._escape_progress(),
             hand_ready_progress=self._hand_ready.progress,
+            preparing=self._prepare_until_ms is not None,
+            prepare_remaining_ms=(
+                max(self._prepare_until_ms - self._now_ms, 0.0)
+                if self._prepare_until_ms is not None else 0.0
+            ),
+            just_passed_step=self._just_passed_step,
         )

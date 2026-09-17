@@ -33,6 +33,8 @@ def test_config_includes_challenge(client):
         "perActionTimeoutMs": 2000, "totalTimeoutMs": 6000, "maxRetries": 1,
         # 손을 들기 전에는 제한 시간이 흐르지 않는다 (앱 대기 단계)
         "waitHandReadyMs": 400, "waitHandTimeoutMs": 15000,
+        # 단계 사이에 동작을 준비할 시간 (제한 시간이 흐르지 않는다)
+        "stepPrepareMs": 1500,
     }
     assert body["steps"] == {"numShapes": 2, "numMoves": 1}
 
@@ -231,3 +233,14 @@ def test_frame_stale_bounds_must_be_ordered(client):
     )
     assert res.status_code == 422
     assert client.get("/config").json()["challenge"]["tracking"]["frameStaleMinMs"] == 150
+
+
+def test_step_prepare_is_adjustable(client):
+    """단계 사이 여유를 실기기 체감으로 조정한다."""
+    res = client.patch(
+        "/admin/config", json={"challenge": {"timing": {"stepPrepareMs": 2500}}}
+    )
+    assert res.status_code == 200
+    timing = res.json()["challenge"]["timing"]
+    assert timing["stepPrepareMs"] == 2500
+    assert timing["perActionTimeoutMs"] == 2000  # 나머지는 그대로

@@ -173,9 +173,13 @@ class _CaptureArea extends ConsumerWidget {
         ChallengePhase.failed || ChallengePhase.unavailable => AppColors.danger,
         ChallengePhase.passed => AppColors.success,
         // 손을 찾는 중에는 아직 준비가 안 됐다는 뜻으로 회색 (인증 화면과 같다)
-        ChallengePhase.running => (flow.status?.awaitingHand ?? true)
-            ? AppColors.textSecondary
-            : AppColors.ring,
+        // 준비 시간에는 방금 단계를 통과했다는 신호로 초록.
+        ChallengePhase.running => switch (flow.status) {
+          null => AppColors.textSecondary,
+          final Status s when s.awaitingHand => AppColors.textSecondary,
+          final Status s when s.preparing => AppColors.success,
+          _ => AppColors.ring,
+        },
         ChallengePhase.idle => AppColors.textSecondary,
       },
       // 대기 중에는 손이 얼마나 연속으로 잡혔는지, 판정 중에는 손 모양 유지
@@ -235,8 +239,26 @@ class _TimeBar extends ConsumerWidget {
     final double total = config.timing.perActionTimeoutMs;
     final double ratio =
         total <= 0 ? 0.0 : (status.remainingMs / total).clamp(0.0, 1.0);
-    // 손을 기다리는 중과 이탈 관문 대기 중에는 제한 시간이 흐르지 않는다.
-    final bool paused = status.awaitingEscape || status.awaitingHand;
+    // 손을 기다리는 중, 준비 시간 중, 이탈 관문 대기 중에는 제한 시간이 흐르지 않는다.
+    final bool paused =
+        status.awaitingEscape || status.awaitingHand || status.preparing;
+
+    if (status.preparing) {
+      // 준비 시간이 줄어드는 것을 보여준다. 제한 시간이 아니라는 뜻으로 색을 바꾼다.
+      final double left = config.timing.stepPrepareMs <= 0
+          ? 0.0
+          : (status.prepareRemainingMs / config.timing.stepPrepareMs)
+              .clamp(0.0, 1.0);
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(3),
+        child: LinearProgressIndicator(
+          value: 1.0 - left,
+          minHeight: 6,
+          backgroundColor: AppColors.surfaceAlt,
+          color: AppColors.progress,
+        ),
+      );
+    }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(3),
@@ -278,7 +300,9 @@ class _Prompt extends ConsumerWidget {
           (flow.status?.awaitingEscape ?? false) ||
                   (flow.status?.awaitingHand ?? true)
               ? AppColors.textSecondary
-              : AppColors.textPrimary,
+              : ((flow.status?.preparing ?? false)
+                  ? AppColors.success // "N단계 완료"는 성공 색으로
+                  : AppColors.textPrimary),
         ),
     };
 

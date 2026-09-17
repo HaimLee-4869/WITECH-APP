@@ -239,6 +239,15 @@ class Status {
   /// 1.0이 되면 1단계가 시작되고 그때부터 제한 시간이 흐른다.
   final double handReadyProgress;
 
+  /// 다음 단계 준비 시간 중인지. 이 동안에는 제한 시간이 흐르지 않는다.
+  final bool preparing;
+
+  /// 준비 시간이 얼마나 남았는지.
+  final double prepareRemainingMs;
+
+  /// 방금 통과한 단계 번호(0-based). "1단계 완료" 표시에 쓴다.
+  final int? justPassedStep;
+
   const Status({
     required this.state,
     required this.stepIndex,
@@ -254,6 +263,9 @@ class Status {
     required this.escapeFrom,
     required this.escapeProgress,
     this.handReadyProgress = 0.0,
+    this.preparing = false,
+    this.prepareRemainingMs = 0.0,
+    this.justPassedStep,
   });
 
   /// 이탈 관문이 닫혀 있어 대기 중인지. 이 동안 제한 시간은 흐르지 않는다.
@@ -282,6 +294,7 @@ class ChallengeStateMachine {
   final double _perActionTimeoutMs;
   final double _totalTimeoutMs;
   final double _waitHandTimeoutMs;
+  final double _stepPrepareMs;
   final int _maxRetries;
   final double _minDetectionScore;
 
@@ -303,6 +316,12 @@ class ChallengeStateMachine {
 
   /// 화면에 들어온 시각. 대기 제한(안전장치)만 여기서 잰다.
   double? _waitStartedMs;
+
+  /// 다음 단계 준비 시간이 끝나는 시각. null이면 준비 중이 아니다.
+  double? _prepareUntilMs;
+
+  /// 방금 통과한 단계 번호. 화면이 "N단계 완료"를 띄우는 데 쓴다.
+  int? _justPassedStep;
 
   double? _stepStartedMs;
   double _nowMs = 0.0;
@@ -333,6 +352,7 @@ class ChallengeStateMachine {
         _perActionTimeoutMs = config.timing.perActionTimeoutMs,
         _totalTimeoutMs = config.timing.totalTimeoutMs,
         _waitHandTimeoutMs = config.timing.waitHandTimeoutMs,
+        _stepPrepareMs = config.timing.stepPrepareMs,
         _maxRetries = config.timing.maxRetries,
         _minDetectionScore = config.tracking.minDetectionScore,
         _shapeConfidenceMin = config.shapeConfidenceMin,
@@ -378,6 +398,18 @@ class ChallengeStateMachine {
     if (state == ChallengeState.waitHand) {
       final Status? waiting = _updateWait(obs);
       if (waiting != null) return waiting;
+    }
+
+    // 다음 단계 준비 시간. 요청 동작을 보고 손을 만들 시간을 준다.
+    // 이 동안에는 단계 제한도 전체 제한도 흐르지 않는다.
+    if (_prepareUntilMs != null) {
+      if (obs.timestampMs < _prepareUntilMs!) {
+        _stepStartedMs = obs.timestampMs;
+        if (_startedMs != null) _startedMs = _startedMs! + _frameDeltaMs;
+        return _status();
+      }
+      _prepareUntilMs = null;
+      _stepStartedMs = obs.timestampMs;
     }
 
     if (obs.timestampMs - _startedMs! > _totalTimeoutMs) {
@@ -619,6 +651,7 @@ class ChallengeStateMachine {
   }
 
   Status _advance(double timestampMs) {
+    final int passedIndex = stepIndex;
     final StepResult step = steps[stepIndex];
     step.passed = true;
     step.elapsedMs = timestampMs - _stepStartedMs!;
@@ -634,7 +667,11 @@ class ChallengeStateMachine {
     } else {
       _stepStartedMs = timestampMs;
       _armEscapeGate();
+      if (_stepPrepareMs > 0) {
+        _prepareUntilMs = timestampMs + _stepPrepareMs;
+      }
     }
+    _justPassedStep = passedIndex;
     return _status();
   }
 
@@ -649,6 +686,7 @@ class ChallengeStateMachine {
       _wrong.reset();
       _sustainedWrong = null;
       _window.clear();
+      _prepareUntilMs = null;
       return _status();
     }
     return _fail(reason, timestampMs);
@@ -695,6 +733,11 @@ class ChallengeStateMachine {
       escapeFrom: _escapePending ? _escapeFrom : null,
       escapeProgress: _escapeProgress,
       handReadyProgress: _handReady.progress,
+      preparing: _prepareUntilMs != null,
+      prepareRemainingMs: _prepareUntilMs == null
+          ? 0.0
+          : ((_prepareUntilMs! - _nowMs) < 0 ? 0.0 : _prepareUntilMs! - _nowMs),
+      justPassedStep: _justPassedStep,
     );
   }
 }
