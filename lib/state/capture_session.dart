@@ -76,6 +76,12 @@ class CaptureSession {
   Timer? _recordTimer;
 
   final List<HandFrame> _buffer = <HandFrame>[];
+
+  /// 버퍼에 마지막으로 넣은 프레임의 tMs.
+  ///
+  /// 서버는 tMs가 **엄격히 증가**해야 받는다(422 `non_monotonic_timestamps`).
+  /// 소스가 같은 프레임을 두 번 흘리거나 순서가 뒤집혀 오면 여기서 버린다.
+  int _lastBufferedTMs = -1;
   final _sinceLastFrame = Stopwatch();
   final _recordClock = Stopwatch();
 
@@ -99,6 +105,7 @@ class CaptureSession {
   void begin() {
     if (phase != CapturePhase.idle) return;
     _buffer.clear();
+    _lastBufferedTMs = -1;
     _handContinuous.reset();
     phase = CapturePhase.handSearching;
     progress = 0.0;
@@ -110,6 +117,7 @@ class CaptureSession {
   void cancel() {
     _cancelFlowTimers();
     _buffer.clear();
+    _lastBufferedTMs = -1;
     _handContinuous.reset();
     phase = CapturePhase.idle;
     progress = 0.0;
@@ -141,8 +149,11 @@ class CaptureSession {
       ..start();
 
     // recording 중에만 버퍼에 쌓는다. 다른 단계의 프레임은 오버레이 표시용이다.
-    if (phase == CapturePhase.recording && _isFreshForRecording(frame)) {
+    if (phase == CapturePhase.recording &&
+        _isFreshForRecording(frame) &&
+        frame.tMs > _lastBufferedTMs) {
       _buffer.add(frame);
+      _lastBufferedTMs = frame.tMs;
     }
 
     latestFrame = frame;
@@ -162,6 +173,7 @@ class CaptureSession {
   void _onSourceError(Object error) {
     _cancelFlowTimers();
     _buffer.clear();
+    _lastBufferedTMs = -1;
     _handContinuous.reset();
     phase = CapturePhase.idle;
     progress = 0.0;
@@ -245,6 +257,7 @@ class CaptureSession {
 
   void _enterRecording() {
     _buffer.clear();
+    _lastBufferedTMs = -1;
     // tMs는 "캡처 시작 시점부터의 경과 시간"이므로 여기서 기준점을 다시 잡는다.
     source.resetClock();
     _recordClock
@@ -269,6 +282,7 @@ class CaptureSession {
     _cancelFlowTimers();
     final frames = List<HandFrame>.unmodifiable(_buffer);
     _buffer.clear();
+    _lastBufferedTMs = -1;
     _handContinuous.reset();
     phase = CapturePhase.idle;
     progress = 1.0;
@@ -279,6 +293,7 @@ class CaptureSession {
   void _abort(String notice) {
     _cancelFlowTimers();
     _buffer.clear();
+    _lastBufferedTMs = -1;
     _handContinuous.reset();
     phase = CapturePhase.handSearching;
     progress = 0.0;

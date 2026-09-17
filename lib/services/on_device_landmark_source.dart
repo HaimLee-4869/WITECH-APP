@@ -93,6 +93,8 @@ class OnDeviceLandmarkSource implements LandmarkSource {
         delegate: mp.HandLandmarkerDelegate.gpu,
       );
 
+      // 앞선 구독이 남아 있으면 같은 결과가 두 번 흐른다. 방어적으로 끊는다.
+      await _sub?.cancel();
       _sub = _plugin!.landmarkStream.listen(_onHands);
 
       _stopwatch
@@ -126,10 +128,28 @@ class OnDeviceLandmarkSource implements LandmarkSource {
     if (!_running) return;
     _running = false;
     _stopwatch.stop();
+
+    // ⚠️ 검출 스트림 구독을 반드시 끊는다.
+    //
+    // 이걸 빼먹으면 화면을 옮기며 stop() → start()를 할 때 구독이 하나 더 붙고,
+    // **같은 검출 결과가 두 번 흘러나온다.** 2026-09-18 실기기에서 Challenge를
+    // 거쳐 인증하면 4초에 120프레임이 모였다(정상 60장의 두 배).
+    //
+    // 모델 입력의 절반이 속도 feature라, 같은 프레임이 두 번씩 들어가면 프레임 간
+    // 변위가 0이 되어 손이 거의 안 움직이는 것처럼 보인다. 동작 간 차이도 사람 간
+    // 차이도 뭉개져 인증이 통째로 헐거워졌다.
+    await _sub?.cancel();
+    _sub = null;
+
     final camera = _camera;
     if (camera != null && camera.value.isStreamingImages) {
       await camera.stopImageStream();
     }
+    await camera?.dispose();
+    _camera = null;
+
+    _plugin?.dispose();
+    _plugin = null;
   }
 
   @override
