@@ -11,7 +11,7 @@
 | 구성 요소 | 위치 | 상태 |
 |---|---|---|
 | **Flutter 앱** | `lib/` | 화면 UI, 카메라 프리뷰 + 손 뼈대 오버레이, 랜드마크 수집 |
-| **안티스푸핑 Challenge** | `lib/challenge/` (판정)<br>`challenge_response/` (원본·임계값 도출) | 무작위 동작 3개를 요청하고 규칙 기반 판정. 인증 앞단 |
+| **안티스푸핑 Challenge** | `lib/challenge/` (판정)<br>`challenge_response/` (원본·임계값 도출) | 무작위 동작 3개를 요청하고 규칙 기반 판정. **제스처 인증과 한 번의 촬영으로 이어진다** |
 | **FastAPI 백엔드** | `backend/` | SQLite + Alembic, 등록·인증·이력·운영 API |
 | **AI 인증 모델** | `backend/ai/` | AI팀 릴리스 `shared-dual-head-v1.1.1`. 백엔드가 import해서 쓴다 |
 
@@ -115,7 +115,7 @@ flutter run --release    # 또는 그냥 flutter run (디버그)
 
 ```bash
 flutter analyze   # 경고 0개여야 한다
-flutter test      # 340개 (상태 머신·오버레이·화면 전환 + 안티스푸핑 Challenge 237개)
+flutter test      # 428개 (세션·오버레이·화면 전환 + 안티스푸핑 Challenge)
 ```
 
 테스트는 `kUseFakeLandmarks` 값과 무관하게 항상 가짜 소스를 주입한다
@@ -162,7 +162,8 @@ cd challenge_response && pytest                       # 236개 (test_guide_overl
 | `kCountdownSeconds` | `2` | 카운트다운 길이 |
 | `kGestureIds` | `G1`~`G5` | 서버가 아는 수어 암호 ID. 홈 화면에서 고른 값이 `gestureId`로 전송된다 |
 | `kPluginProvidesHandedness` | `false` | 플러그인이 좌/우를 주지 않아 `handedness`를 보내지 않는다 (아래 "알려진 제약") |
-| `kShowChallengeDebug` | `true` | Challenge 진단 패널과 서버 로그 전송. 시연 전에 끈다 (`lib/screens/challenge_screen.dart`) |
+| `kShowChallengeDebug` | `false` | 화면 진단 패널. 프레임마다 바뀌어 실기기에서는 읽기 어렵다 (`lib/screens/challenge_screen.dart`) |
+| `kSendChallengeLog` | `true` | 판정 로그를 서버로 전송. 연속성 임계값을 이 로그로 도출한다. 시연 전에 끈다 |
 
 원 테두리 색이 의미를 나눈다. **진행률 아크만 보라(`AppColors.progress`)** 다 —
 초록으로 두면 차오르는 아크가 "정답/통과"로 읽히는데 실제로는 촬영 진행도일 뿐이다.
@@ -297,16 +298,14 @@ lib/
     http_api_client.dart         실서버 연동 (config/users/verify/enroll/logs/stats/debug)
     challenge_debug_sink.dart    판정 로그를 서버로 (fire and forget)
   state/
-    capture_session.dart         손 탐색→카운트다운→수집 공용 절차
-    auth_flow_controller.dart
+    capture_session.dart         손 탐색→카운트다운→수집 공용 절차 (등록 전용)
+    auth_session_controller.dart ★ Challenge와 제스처 수집을 한 세션으로
     enroll_controller.dart
-    challenge_controller.dart    카메라 스트림 → Observation (판정 규칙은 없다)
     admin_controller.dart
     providers.dart               DI 지점
   screens/
     home_screen.dart             사용자 선택·추가 + 3개 진입점
-    challenge_screen.dart        동작 확인 (인증 앞단)
-    auth_screen.dart             ★ 가장 중요한 화면
+    challenge_screen.dart        ★ 인증 세션 전체 (동작 확인 → 수집 → 전송)
     result_screen.dart
     enroll_screen.dart
     add_user_sheet.dart
@@ -325,17 +324,25 @@ lib/
 
 ## 인증 흐름
 
-홈에서 "인증하기"를 누르면 **동작 확인(Challenge)** 을 먼저 거친다. 통과해야 제스처
-인증으로 넘어가고, 실패하면 `/verify`를 호출하지 않는다 (아래 "안티스푸핑 Challenge").
+홈에서 "인증하기"를 누르면 **동작 확인(Challenge)과 제스처 인증이 한 번의 촬영으로**
+이어진다. 카메라는 세션 내내 한 번만 잡고, 중간에 놓지 않는다.
 
 ```
-HomeScreen → ChallengeScreen → AuthScreen → ResultScreen
-             (안티스푸핑)       (제스처 인증)
+HomeScreen → ChallengeScreen ──────────────→ ResultScreen
+             동작 확인 → 제스처 수집 → 전송
+             (카메라 한 번, 끊기면 전체 실패)
 ```
+
+**왜 한 번의 촬영인가.** 촬영을 둘로 나누면 Challenge는 본인 손으로 통과하고
+제스처는 피해자 영상을 들이대는 공격을 막지 못한다. 그 사이에 카메라를
+stop/start 하던 구간이 그 구멍이었다. 지금은 Challenge 통과 시 카메라를 놓지
+않고 그대로 수집으로 넘어가며, **추적이 끊기면 세션 전체가 실패한다**
+(`SESSION_BROKEN`). PASS 표시 구간에도 추적은 계속된다 — 통과 표시를 본
+사용자가 손을 내리는 순간이 가장 위험하다.
 
 Challenge는 **손이 원 안에 들어올 때까지 기다린 뒤** 시작한다. 대기 중에는
-제한 시간이 흐르지 않고 재시도도 차감되지 않는다. 인증 화면의 `handSearching`과
-같은 자리다.
+제한 시간이 흐르지 않고 재시도도 차감되지 않는다. 손을 들기 전까지는 아직
+"유지해야 하는 구간"이 아니라서, 이 동안 손이 없어도 세션이 끊기지 않는다.
 
 ```
 waitHand    "손을 원 안에 위치시켜 주세요". 테두리 = 회색. **시계 멈춤**
@@ -350,36 +357,41 @@ ACTION 2     …
 ```
 
 단계에서 실패하고 재시도가 남아 있으면 `FAIL` + 사유를 같은 방식으로 보여준 뒤
-그 단계를 다시 준비한다. 마지막 단계는 `PASS`만 보여주고 인증 화면으로 넘어간다.
+그 단계를 다시 준비한다. 마지막 단계는 `PASS`만 보여주고 **같은 화면에서** 제스처
+수집으로 넘어간다.
 
 **시계가 멈추는 구간이 넷이다.** 손을 기다릴 때, 단계 결과 표시, 단계 사이 준비
 시간, 이탈 관문 대기. 넷 다 사용자가 화면을 읽고 손을 만드는 시간이라 판정
 제한으로 재면 안 된다. 표시가 제한 시간을 먹으면 보여주기만 하다가 타임아웃이 난다.
 
-### 캡처 상태 머신
+### 세션 상태 머신
 
-`lib/state/auth_flow_controller.dart` + `lib/state/capture_session.dart`.
+`lib/state/auth_session_controller.dart`. 한 컨트롤러가 카메라·구독·시계를
+모두 쥐고 있다 (`SessionPhase`).
 
 ```
-idle          카메라 켜짐. "수어 암호를 입력하세요". 인증 버튼 활성
-   ↓ 인증 버튼
-handSearching 손을 찾는 중. "손을 원 안에 위치시켜 주세요". 원 테두리 = 회색
-   ↓ 400ms 연속 검출 (프레임 수가 아니라 시간)
-handReady     "2초 후 시작합니다". 원 테두리 = 민트. 2→1 카운트다운
-   ↓ 카운트다운 종료
-recording     서버가 정한 시간(기본 4000ms) 수집. 원 테두리 = 진행률 아크
+idle          아직 시작하지 않음
+   ↓ begin() — 카메라를 여기서 한 번 잡는다
+challenge     손 대기 → 동작 3개 판정. 원 테두리 = 회색/초록/빨강
+   ↓ 전 단계 통과 (카메라를 놓지 않는다)
+recording     서버가 정한 시간(기본 4000ms) 수집. 원 테두리 = 보라 진행률 아크
    ↓ 수집 종료
 uploading     "확인 중입니다". 원 안에 인디케이터
    ↓ 응답
 done          결과 화면으로 전환
 ```
 
-되돌아가는 경로:
+끝나는 경로:
 
-- `recording`/`handReady` 중 손이 15프레임 이상 사라지면 → `handSearching`
-  (수집 버퍼를 비우고 "손이 화면을 벗어났습니다" 안내)
-- 수집된 프레임이 20개 미만이면 → 서버로 보내지 않고 `idle`로 되돌려 재시도 안내
-- 타임아웃 / 그 외 오류 → `idle` + 각각 다른 안내 문구
+- Challenge 단계 실패 + 재시도 없음 → `failed` + 사유별 안내
+- **손이 오래 사라짐(`challenge` 대기 구간 제외, PASS 표시 중 포함)** → `failed`
+  (`SESSION_BROKEN`, "처음부터 끝까지 손을 화면 안에 유지해주세요")
+- 수집된 프레임이 20개 미만 → 서버로 보내지 않고 `failed`
+- 타임아웃 / 그 외 오류 → `failed` + 각각 다른 안내 문구
+- 설정을 못 받았거나 카메라를 못 켬 → `unavailable`
+
+등록(`/enroll`)은 이 세션을 쓰지 않는다. Challenge 없이
+`capture_session.dart`의 손 탐색→카운트다운→수집 절차 그대로다.
 
 ---
 
@@ -433,9 +445,9 @@ done          결과 화면으로 전환
 
 ## 안티스푸핑 Challenge (`lib/challenge/`)
 
-인증 화면 **앞에** 붙는 단계다. 서버가 아니라 **앱이 무작위 동작 3개(손 모양 2 +
-이동 1)를 내고 앱이 판정한다.** 통과해야 제스처 인증으로 넘어가고, 실패하면
-`/verify`를 호출하지 않는다.
+제스처 수집 **앞에** 붙는 단계다. 서버가 아니라 **앱이 무작위 동작 3개(손 모양 2 +
+이동 1)를 내고 앱이 판정한다.** 통과해야 수집으로 넘어가고, 실패하면
+`/verify`를 호출하지 않는다. 같은 세션·같은 촬영이라 중간에 손을 바꿔 넣을 수 없다.
 
 판정 규칙은 `challenge_response/`(파이썬 프로토타입)에서 그대로 옮겼다. 두 구현이
 갈라지지 않도록 파이썬 실행 결과를 `test/challenge/golden/cross_impl.json`에 남기고
@@ -528,7 +540,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' \
 ### 판정 로그를 PC에서 보기
 
 실기기 화면의 진단 패널은 프레임마다 바뀌어 읽을 수 없다. 같은 값을 한 줄씩 서버로
-보내고 백엔드가 파일과 콘솔에 남긴다. `kShowChallengeDebug`가 true일 때만 동작하고,
+보내고 백엔드가 파일과 콘솔에 남긴다. `kSendChallengeLog`가 true일 때만 동작하고,
 전송이 실패해도 Challenge는 그대로 진행된다(fire and forget).
 
 ```bash
@@ -669,6 +681,24 @@ curl -s localhost:8000/debug/challenge | grep -c 'reason=HAND_LOST'
 ```bash
 curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json'   -d '{"challenge": {"tracking": {"maxLostFrames": 60}}}'
 ```
+
+### 연속 세션의 알려진 한계
+
+**같은 손인지는 아직 검사하지 않는다.** 추적이 끊기지 않았는지만 본다
+(`SESSION_BROKEN`). 프레임 사이에 손 크기나 손목 위치가 튀는 것을 보는
+연속성 검사(`lib/challenge/continuity_monitor.dart`)는 코드가 있지만
+**꺼져 있다** — 정상 세션에서 이 값이 얼마나 튀는지 아직 재지 않았고,
+근거 없는 임계값으로 정상 사용자를 막을 수는 없다.
+
+지금은 `kSendChallengeLog`가 켜져 있을 때 세션 끝에 실측값만 남긴다.
+
+```
+CHALLENGE record done frames=57 scaleJumpMax=1.12 wristJumpMax=0.31 samples=57 gate=off
+```
+
+정상 세션 로그가 충분히 모이면 `challenge_config.json`의 `continuity`에
+`maxScaleJumpRatio`/`maxWristJumpRatio`를 넣고 `enabled: true`로 바꾼다.
+**둘 중 하나라도 없으면 서버가 422로 거절하고 앱도 켜지 않는다.**
 
 ### Challenge의 알려진 한계
 
