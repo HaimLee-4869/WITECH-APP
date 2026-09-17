@@ -176,6 +176,11 @@ class _CaptureArea extends ConsumerWidget {
         // 준비 시간에는 방금 단계를 통과했다는 신호로 초록.
         ChallengePhase.running => switch (flow.status) {
           null => AppColors.textSecondary,
+          // 결과 표시가 가장 우선이다. 방금 맞았는지 틀렸는지를 먼저 알려준다.
+          final Status s when s.stepResult == StepOutcome.pass =>
+            AppColors.success,
+          final Status s when s.stepResult == StepOutcome.fail =>
+            AppColors.danger,
           final Status s when s.awaitingHand => AppColors.textSecondary,
           final Status s when s.preparing => AppColors.success,
           _ => AppColors.ring,
@@ -195,6 +200,7 @@ class _CaptureArea extends ConsumerWidget {
         children: <Widget>[
           ?source.buildPreview(),
           const _Overlay(),
+          const _ResultBadge(),
         ],
       ),
     );
@@ -239,9 +245,17 @@ class _TimeBar extends ConsumerWidget {
     final double total = config.timing.perActionTimeoutMs;
     final double ratio =
         total <= 0 ? 0.0 : (status.remainingMs / total).clamp(0.0, 1.0);
-    // 손을 기다리는 중, 준비 시간 중, 이탈 관문 대기 중에는 제한 시간이 흐르지 않는다.
-    final bool paused =
-        status.awaitingEscape || status.awaitingHand || status.preparing;
+    // 손을 기다리는 중, 결과 표시 중, 준비 시간 중, 이탈 관문 대기 중에는
+    // 제한 시간이 흐르지 않는다.
+    final bool paused = status.awaitingEscape ||
+        status.awaitingHand ||
+        status.preparing ||
+        status.stepResult != null;
+
+    if (status.stepResult != null) {
+      // 결과를 보는 동안에는 시간 바를 비워 둔다. 시간이 흐르지 않는다는 뜻이다.
+      return const SizedBox(height: 6);
+    }
 
     if (status.preparing) {
       // 준비 시간이 줄어드는 것을 보여준다. 제한 시간이 아니라는 뜻으로 색을 바꾼다.
@@ -401,6 +415,65 @@ class _Actions extends ConsumerWidget {
           },
         ),
       ],
+    );
+  }
+}
+
+/// 단계 결과(PASS/FAIL)를 원 위에 크게 띄운다.
+///
+/// 동작을 맞게 해도 순식간에 넘어가면 제대로 한 건지 인지가 안 된다.
+/// 끝난 세션(통과·실패)에도 같은 배지를 보여준다.
+class _ResultBadge extends ConsumerWidget {
+  const _ResultBadge();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ChallengeFlowState flow = ref.watch(challengeControllerProvider);
+    final Status? status = flow.status;
+
+    final (bool pass, FailReason? reason)? shown = switch (flow.phase) {
+      ChallengePhase.passed => (true, null),
+      ChallengePhase.failed => (false, status?.failReason),
+      _ => switch (status?.stepResult) {
+        StepOutcome.pass => (true, null),
+        StepOutcome.fail => (false, status?.stepResultReason),
+        null => null,
+      },
+    };
+    if (shown == null) return const SizedBox.shrink();
+
+    final Color color = shown.$1 ? AppColors.success : AppColors.danger;
+
+    return ColoredBox(
+      color: AppColors.bg.withValues(alpha: 0.55),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              shown.$1 ? Icons.check_circle_outline : Icons.cancel_outlined,
+              size: 64,
+              color: color,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              shown.$1 ? 'PASS' : 'FAIL',
+              style: AppText.displayTitle.copyWith(color: color),
+            ),
+            if (!shown.$1) ...<Widget>[
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  challengeFailMessage(shown.$2),
+                  textAlign: TextAlign.center,
+                  style: AppText.caption.copyWith(color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }

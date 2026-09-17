@@ -307,6 +307,9 @@ class Status:
     escape_from: Optional[str] = None        # 벗어나야 하는 이전 손 모양
     escape_progress: float = 1.0             # 0.0~1.0, 1.0이면 관문 열림
     hand_ready_progress: float = 0.0         # WAIT_HAND에서 손이 연속으로 잡힌 정도
+    step_result: Optional[str] = None        # "PASS" | "FAIL" 표시 중
+    step_result_remaining_ms: float = 0.0
+    step_result_reason: Optional[FailReason] = None
     preparing: bool = False                  # 다음 단계 준비 시간 중인지
     prepare_remaining_ms: float = 0.0        # 준비 시간이 얼마나 남았는지
     just_passed_step: Optional[int] = None   # 방금 통과한 단계 번호(0-based)
@@ -349,6 +352,9 @@ class ChallengeStateMachine:
         # 단계가 넘어간 뒤 다음 판정을 시작하기까지 주는 시간. 요청 동작을 보고
         # 손을 준비할 시간이라, 이 동안에는 per_action_timeout_ms가 흐르지 않는다.
         self.step_prepare_ms = float(timing.get("step_prepare_ms", 0.0))
+        # 단계 결과(PASS/FAIL)를 보여주는 시간. 맞게 했는지 인지할 틈을 준다.
+        # 이 동안에는 제한 시간이 흐르지 않는다.
+        self.step_result_hold_ms = float(timing.get("step_result_hold_ms", 0.0))
 
         tracking = config["tracking"]
         self.max_lost_frames = int(tracking["max_lost_frames"])
@@ -388,6 +394,10 @@ class ChallengeStateMachine:
         self._hand_ready = MsSpan(self.wait_hand_ready_ms)
         # 다음 단계 준비 시간이 끝나는 시각. None이면 준비 중이 아니다.
         self._prepare_until_ms: Optional[float] = None
+        # 단계 결과 표시가 끝나는 시각과 그 내용. None이면 표시 중이 아니다.
+        self._result_until_ms: Optional[float] = None
+        self._result_kind: Optional[str] = None      # "PASS" | "FAIL"
+        self._result_reason: Optional[FailReason] = None
         self._hold = FrameSpan(self.hold_frames, self.reference_fps)
         self._wrong_label: Optional[str] = None
         self._wrong = FrameSpan(self.hold_frames, self.reference_fps)
@@ -433,6 +443,16 @@ class ChallengeStateMachine:
             waiting = self._update_wait(obs)
             if waiting is not None:
                 return waiting
+
+        # 단계 결과(PASS/FAIL) 표시. 맞게 했는지 인지할 틈을 준다.
+        # 준비 시간과 마찬가지로 이 동안에는 아무 시계도 흐르지 않는다.
+        if self._result_until_ms is not None:
+            if obs.timestamp_ms < self._result_until_ms:
+                self._step_started_ms = obs.timestamp_ms
+                if self._started_ms is not None:
+                    self._started_ms += self._frame_delta_ms
+                return self._status()
+            return self._resolve_result(obs.timestamp_ms)
 
         # 다음 단계 준비 시간. 요청 동작을 보고 손을 만들 시간을 준다.
         # 이 동안에는 단계 제한도 전체 제한도 흐르지 않는다.
@@ -663,14 +683,39 @@ class ChallengeStateMachine:
         self._sustained_wrong = None
         self._window.clear()
         self._retries_left = self.max_retries
+        self._just_passed_step = step_index
+
+        # PASS를 먼저 보여준다. 다음 단계로 갈지 끝낼지는 표시가 끝난 뒤 정한다.
+        if self.step_result_hold_ms > 0:
+            self._result_kind = "PASS"
+            self._result_reason = None
+            self._result_until_ms = timestamp_ms + self.step_result_hold_ms
+            return self._status()
+        return self._finish_advance(timestamp_ms)
+
+    def _finish_advance(self, timestamp_ms: float) -> Status:
+        """PASS 표시가 끝난 뒤(또는 표시가 없을 때) 다음 단계로 넘어간다."""
         if self.step_index >= len(self.challenge.actions):
             self.state = State.PASS
-        else:
-            self._step_started_ms = timestamp_ms
-            self._arm_escape_gate()
-            if self.step_prepare_ms > 0:
-                self._prepare_until_ms = timestamp_ms + self.step_prepare_ms
-        self._just_passed_step = step_index
+            return self._status()
+        self._step_started_ms = timestamp_ms
+        self._arm_escape_gate()
+        if self.step_prepare_ms > 0:
+            self._prepare_until_ms = timestamp_ms + self.step_prepare_ms
+        return self._status()
+
+    def _resolve_result(self, timestamp_ms: float) -> Status:
+        """결과 표시 시간이 끝났다. PASS면 다음 단계로, FAIL이면 그 단계를 다시."""
+        kind = self._result_kind
+        self._result_until_ms = None
+        self._result_kind = None
+        self._result_reason = None
+        if kind == "PASS":
+            return self._finish_advance(timestamp_ms)
+        # FAIL(재시도): 같은 단계를 다시 준비한다.
+        self._step_started_ms = timestamp_ms
+        if self.step_prepare_ms > 0:
+            self._prepare_until_ms = timestamp_ms + self.step_prepare_ms
         return self._status()
 
     def _fail_step(self, reason: FailReason, timestamp_ms: float) -> Status:
@@ -685,6 +730,10 @@ class ChallengeStateMachine:
             self._sustained_wrong = None
             self._window.clear()
             self._prepare_until_ms = None
+            if self.step_result_hold_ms > 0:
+                self._result_kind = "FAIL"
+                self._result_reason = reason
+                self._result_until_ms = timestamp_ms + self.step_result_hold_ms
             return self._status()
         return self._fail(reason, timestamp_ms)
 
@@ -721,6 +770,12 @@ class ChallengeStateMachine:
             escape_from=self._escape_from if self._escape_pending() else None,
             escape_progress=self._escape_progress(),
             hand_ready_progress=self._hand_ready.progress,
+            step_result=self._result_kind,
+            step_result_remaining_ms=(
+                max(self._result_until_ms - self._now_ms, 0.0)
+                if self._result_until_ms is not None else 0.0
+            ),
+            step_result_reason=self._result_reason,
             preparing=self._prepare_until_ms is not None,
             prepare_remaining_ms=(
                 max(self._prepare_until_ms - self._now_ms, 0.0)

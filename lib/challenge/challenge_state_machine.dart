@@ -19,6 +19,9 @@ import 'movement_detector.dart';
 
 enum ChallengeState { idle, waitHand, action, passed, failed }
 
+/// 단계 결과 표시. 맞게 했는지 인지할 틈을 준다.
+enum StepOutcome { pass, fail }
+
 enum FailReason {
   handNotFound,
   wrongShape,
@@ -239,6 +242,17 @@ class Status {
   /// 1.0이 되면 1단계가 시작되고 그때부터 제한 시간이 흐른다.
   final double handReadyProgress;
 
+  /// 단계 결과를 보여주는 중이면 그 종류. null이면 표시 중이 아니다.
+  ///
+  /// 이 동안에도 제한 시간이 흐르지 않는다.
+  final StepOutcome? stepResult;
+
+  /// 결과 표시가 얼마나 남았는지.
+  final double stepResultRemainingMs;
+
+  /// FAIL 표시일 때의 사유.
+  final FailReason? stepResultReason;
+
   /// 다음 단계 준비 시간 중인지. 이 동안에는 제한 시간이 흐르지 않는다.
   final bool preparing;
 
@@ -263,6 +277,9 @@ class Status {
     required this.escapeFrom,
     required this.escapeProgress,
     this.handReadyProgress = 0.0,
+    this.stepResult,
+    this.stepResultRemainingMs = 0.0,
+    this.stepResultReason,
     this.preparing = false,
     this.prepareRemainingMs = 0.0,
     this.justPassedStep,
@@ -295,6 +312,7 @@ class ChallengeStateMachine {
   final double _totalTimeoutMs;
   final double _waitHandTimeoutMs;
   final double _stepPrepareMs;
+  final double _stepResultHoldMs;
   final int _maxRetries;
   final double _minDetectionScore;
 
@@ -319,6 +337,11 @@ class ChallengeStateMachine {
 
   /// 다음 단계 준비 시간이 끝나는 시각. null이면 준비 중이 아니다.
   double? _prepareUntilMs;
+
+  /// 단계 결과 표시가 끝나는 시각과 그 내용. null이면 표시 중이 아니다.
+  double? _resultUntilMs;
+  StepOutcome? _resultKind;
+  FailReason? _resultReason;
 
   /// 방금 통과한 단계 번호. 화면이 "N단계 완료"를 띄우는 데 쓴다.
   int? _justPassedStep;
@@ -353,6 +376,7 @@ class ChallengeStateMachine {
         _totalTimeoutMs = config.timing.totalTimeoutMs,
         _waitHandTimeoutMs = config.timing.waitHandTimeoutMs,
         _stepPrepareMs = config.timing.stepPrepareMs,
+        _stepResultHoldMs = config.timing.stepResultHoldMs,
         _maxRetries = config.timing.maxRetries,
         _minDetectionScore = config.tracking.minDetectionScore,
         _shapeConfidenceMin = config.shapeConfidenceMin,
@@ -398,6 +422,17 @@ class ChallengeStateMachine {
     if (state == ChallengeState.waitHand) {
       final Status? waiting = _updateWait(obs);
       if (waiting != null) return waiting;
+    }
+
+    // 단계 결과(PASS/FAIL) 표시. 맞게 했는지 인지할 틈을 준다.
+    // 준비 시간과 마찬가지로 이 동안에는 아무 시계도 흐르지 않는다.
+    if (_resultUntilMs != null) {
+      if (obs.timestampMs < _resultUntilMs!) {
+        _stepStartedMs = obs.timestampMs;
+        if (_startedMs != null) _startedMs = _startedMs! + _frameDeltaMs;
+        return _status();
+      }
+      return _resolveResult(obs.timestampMs);
     }
 
     // 다음 단계 준비 시간. 요청 동작을 보고 손을 만들 시간을 준다.
@@ -662,16 +697,45 @@ class ChallengeStateMachine {
     _sustainedWrong = null;
     _window.clear();
     _retriesLeft = _maxRetries;
+    _justPassedStep = passedIndex;
+
+    // PASS를 먼저 보여준다. 다음 단계로 갈지 끝낼지는 표시가 끝난 뒤 정한다.
+    if (_stepResultHoldMs > 0) {
+      _resultKind = StepOutcome.pass;
+      _resultReason = null;
+      _resultUntilMs = timestampMs + _stepResultHoldMs;
+      return _status();
+    }
+    return _finishAdvance(timestampMs);
+  }
+
+  /// PASS 표시가 끝난 뒤(또는 표시가 없을 때) 다음 단계로 넘어간다.
+  Status _finishAdvance(double timestampMs) {
     if (stepIndex >= challenge.actions.length) {
       state = ChallengeState.passed;
-    } else {
-      _stepStartedMs = timestampMs;
-      _armEscapeGate();
-      if (_stepPrepareMs > 0) {
-        _prepareUntilMs = timestampMs + _stepPrepareMs;
-      }
+      return _status();
     }
-    _justPassedStep = passedIndex;
+    _stepStartedMs = timestampMs;
+    _armEscapeGate();
+    if (_stepPrepareMs > 0) {
+      _prepareUntilMs = timestampMs + _stepPrepareMs;
+    }
+    return _status();
+  }
+
+  /// 결과 표시 시간이 끝났다. PASS면 다음 단계로, FAIL이면 그 단계를 다시.
+  Status _resolveResult(double timestampMs) {
+    final StepOutcome? kind = _resultKind;
+    _resultUntilMs = null;
+    _resultKind = null;
+    _resultReason = null;
+    if (kind == StepOutcome.pass) return _finishAdvance(timestampMs);
+
+    // FAIL(재시도): 같은 단계를 다시 준비한다.
+    _stepStartedMs = timestampMs;
+    if (_stepPrepareMs > 0) {
+      _prepareUntilMs = timestampMs + _stepPrepareMs;
+    }
     return _status();
   }
 
@@ -687,6 +751,11 @@ class ChallengeStateMachine {
       _sustainedWrong = null;
       _window.clear();
       _prepareUntilMs = null;
+      if (_stepResultHoldMs > 0) {
+        _resultKind = StepOutcome.fail;
+        _resultReason = reason;
+        _resultUntilMs = timestampMs + _stepResultHoldMs;
+      }
       return _status();
     }
     return _fail(reason, timestampMs);
@@ -733,6 +802,11 @@ class ChallengeStateMachine {
       escapeFrom: _escapePending ? _escapeFrom : null,
       escapeProgress: _escapeProgress,
       handReadyProgress: _handReady.progress,
+      stepResult: _resultKind,
+      stepResultRemainingMs: _resultUntilMs == null
+          ? 0.0
+          : ((_resultUntilMs! - _nowMs) < 0 ? 0.0 : _resultUntilMs! - _nowMs),
+      stepResultReason: _resultReason,
       preparing: _prepareUntilMs != null,
       prepareRemainingMs: _prepareUntilMs == null
           ? 0.0

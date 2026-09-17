@@ -317,6 +317,18 @@ def sequence_cases():
                     # 준비 시간(1500ms)보다 오래 아무것도 안 해도 살아 있어야 한다
                     {"kind": "shape", "label": "OPEN_PALM", "frames": 70},
                     {"kind": "shape", "label": "FIST", "frames": ESCAPE + hold}]},
+        # --- 단계 결과 표시 (2026-09-18) ---
+        # PASS/FAIL을 보여주는 동안에도 제한 시간이 흐르지 않는다.
+        {"name": "result_hold_does_not_consume_timeout",
+         "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
+         "config": {"timing": {"step_result_hold_ms": 1500, "step_prepare_ms": 1500}},
+         "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": hold},
+                    # PASS 1.5초 + 준비 1.5초 = 3초. per_action(2초)보다 길다.
+                    {"kind": "shape", "label": "FIST", "frames": 120}]},
+        {"name": "last_step_pass_finishes_after_hold",
+         "actions": ["OPEN_PALM"],
+         "config": {"timing": {"step_result_hold_ms": 1500}},
+         "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": hold + 60}]},
         {"name": "score_at_threshold_passes",
          "actions": ["OPEN_PALM", "FIST", "MOVE_RIGHT"],
          "script": [{"kind": "shape", "label": "OPEN_PALM", "frames": hold,

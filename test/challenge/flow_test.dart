@@ -103,11 +103,17 @@ void main() {
     source = ScriptedSource();
     // 실기기에서 Challenge를 끝낼 수 있게 여유를 둔 설정. 임계값 자체는
     // 서버 기본값 그대로다.
+    // 이 파일은 **컨트롤러 배선**(좌표 변환·워치독·구독)을 본다. 결과 표시와 준비
+    // 시간은 실제 시간을 그대로 기다리므로, 켜 두면 3단계에 10초 넘게 걸려
+    // 전체 테스트가 붙어 돌 때 불안정해진다. 그 규칙은 step_result_test.dart와
+    // step_prepare_test.dart가 따로 본다. 여기서는 짧게 한 번만 확인한다.
     config = configWith(<String, dynamic>{
       'timing': <String, dynamic>{
         'perActionTimeoutMs': 4000,
         'totalTimeoutMs': 30000,
         'maxRetries': 0,
+        'stepPrepareMs': 0,
+        'stepResultHoldMs': 0,
       },
     });
     container = ProviderContainer(
@@ -137,7 +143,12 @@ void main() {
   ///
   /// 프레임 수를 고정하면 유지 시간(shapeHoldFrames)이나 이동 윈도우가 찰 때까지
   /// 모자랄 수 있다. 조건이 채워질 때까지 넣는다.
-  Future<void> perform(String action, {int maxFrames = 80}) async {
+  /// 한 단계에 쓸 수 있는 실제 시간.
+  ///
+  /// 프레임 수로 한도를 잡으면 전체 테스트가 붙어 돌 때(스케줄러 지연) 같은
+  /// 프레임 수가 더 긴 시간이 되어 들쭉날쭉해진다. 벽시계로 잰다.
+  Future<void> perform(String action,
+      {Duration budget = const Duration(seconds: 8)}) async {
     final int before = flow().stepIndex;
     final bool isShape = kShapePatterns.containsKey(action);
     final Coords hand =
@@ -149,11 +160,12 @@ void main() {
     final double sign = config.coordinateFrame == 'mirrored' ? -1.0 : 1.0;
     final ({double dx, double dy})? dir = isShape ? null : arrowFor(action);
 
-    // 준비 시간(stepPrepareMs) 동안에는 판정이 돌지 않는다. 그 프레임은 한도에
-    // 넣지 않는다 — 실제 사용자도 그림을 보며 기다린다.
+    // 결과 표시(stepResultHoldMs)와 준비 시간(stepPrepareMs) 동안에는 판정이
+    // 돌지 않는다. 그 시간은 한도에 넣지 않는다 — 실제 사용자도 기다린다.
+    final Stopwatch judging = Stopwatch();
     int used = 0;
     int i = 0;
-    while (used < maxFrames) {
+    while (judging.elapsed < budget) {
       if (isShape) {
         source.emitHand(hand, tMs: i * 20);
       } else {
@@ -168,7 +180,15 @@ void main() {
       i++;
       await Future<void>.delayed(frameGap);
       if (flow().finished || flow().stepIndex != before) return;
-      if (!(flow().status?.preparing ?? false)) used++;
+      final Status? s = flow().status;
+      final bool waiting =
+          (s?.preparing ?? false) || (s?.stepResult != null);
+      if (waiting) {
+        judging.stop();
+      } else {
+        used++;
+        if (!judging.isRunning) judging.start();
+      }
     }
   }
 
@@ -185,10 +205,20 @@ void main() {
       if (status != null && status.awaitingEscape) {
         final String escapeTo =
             status.escapeFrom == 'FIST' ? 'OPEN_PALM' : 'FIST';
-        await perform(escapeTo, maxFrames: 30);
+        await perform(escapeTo, budget: const Duration(seconds: 4));
       }
       await perform(action);
       if (flow().finished) break;
+    }
+
+    // 마지막 단계 PASS 표시가 끝나야 통과로 확정된다.
+    final Coords wait = sketchForShape('OPEN_PALM', config).landmarks;
+    final Stopwatch clock = Stopwatch()..start();
+    int i = 0;
+    while (flow().phase == ChallengePhase.running &&
+        clock.elapsed < const Duration(seconds: 6)) {
+      source.emitHand(wait, tMs: 9000 + i++ * 20);
+      await Future<void>.delayed(frameGap);
     }
 
     expect(flow().phase, ChallengePhase.passed,
@@ -291,6 +321,46 @@ void main() {
     expect(source.started, isFalse);
   });
 
+  test('결과 표시와 준비 시간을 지나 통과까지 간다', () async {
+    // 표시 시간을 짧게 켜고 한 단계만 돌린다. 컨트롤러가 이 구간에서
+    // 멈추지 않고 끝까지 가는지 본다.
+    config = configWith(<String, dynamic>{
+      'steps': <String, dynamic>{'numShapes': 1, 'numMoves': 0},
+      'timing': <String, dynamic>{
+        'perActionTimeoutMs': 4000,
+        'totalTimeoutMs': 30000,
+        'maxRetries': 0,
+        'stepPrepareMs': 200,
+        'stepResultHoldMs': 200,
+      },
+    });
+    final ProviderContainer short = ProviderContainer(
+      overrides: [
+        landmarkSourceProvider.overrideWithValue(source),
+        serverConfigProvider.overrideWith(() => _StubConfig(config)),
+      ],
+    );
+    addTearDown(short.dispose);
+
+    await short.read(challengeControllerProvider.notifier).begin();
+    ChallengeFlowState st() => short.read(challengeControllerProvider);
+    expect(st().actions.length, 1);
+
+    final Coords hand = sketchForShape(st().actions.first, config).landmarks;
+    bool sawResult = false;
+    final Stopwatch clock = Stopwatch()..start();
+    int i = 0;
+    while (st().phase == ChallengePhase.running &&
+        clock.elapsed < const Duration(seconds: 8)) {
+      source.emitHand(hand, tMs: i++ * 20);
+      await Future<void>.delayed(frameGap);
+      if (st().status?.stepResult != null) sawResult = true;
+    }
+
+    expect(sawResult, isTrue, reason: 'PASS 표시를 거치지 않았다');
+    expect(st().phase, ChallengePhase.passed);
+  });
+
   test('취소하면 카메라를 놓고 상태를 되돌린다', () async {
     await controller().begin();
     expect(flow().phase, ChallengePhase.running);
@@ -317,7 +387,7 @@ void main() {
       if (status != null && status.awaitingEscape) {
         await perform(
           status.escapeFrom == 'FIST' ? 'OPEN_PALM' : 'FIST',
-          maxFrames: 30,
+          budget: const Duration(seconds: 4),
         );
       }
       await perform(action);
@@ -329,6 +399,16 @@ void main() {
       isNot(FailReason.trackingUnstable),
       reason: '측정하지 않은 하한값을 신뢰도 관문에 넣으면 안 된다',
     );
+
+    // 마지막 단계 PASS 표시가 끝나야 통과로 확정된다.
+    final Coords wait = sketchForShape('OPEN_PALM', config).landmarks;
+    final Stopwatch clock = Stopwatch()..start();
+    int i = 0;
+    while (flow().phase == ChallengePhase.running &&
+        clock.elapsed < const Duration(seconds: 6)) {
+      source.emitHand(wait, tMs: 9000 + i++ * 20);
+      await Future<void>.delayed(frameGap);
+    }
     expect(flow().phase, ChallengePhase.passed);
   });
 

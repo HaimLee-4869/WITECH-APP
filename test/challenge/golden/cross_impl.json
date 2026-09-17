@@ -1411,6 +1411,64 @@
       ]
     },
     {
+      "name": "result_hold_does_not_consume_timeout",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "config": {
+        "timing": {
+          "step_result_hold_ms": 1500,
+          "step_prepare_ms": 1500
+        }
+      },
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5
+        },
+        {
+          "kind": "shape",
+          "label": "FIST",
+          "frames": 120
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 2,
+      "stepsPassed": [
+        true,
+        true,
+        false
+      ]
+    },
+    {
+      "name": "last_step_pass_finishes_after_hold",
+      "actions": [
+        "OPEN_PALM"
+      ],
+      "config": {
+        "timing": {
+          "step_result_hold_ms": 1500
+        }
+      },
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 65
+        }
+      ],
+      "state": "PASS",
+      "failReason": null,
+      "stepIndex": 1,
+      "stepsPassed": [
+        true
+      ]
+    },
+    {
       "name": "score_at_threshold_passes",
       "actions": [
         "OPEN_PALM",

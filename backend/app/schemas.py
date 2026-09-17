@@ -207,6 +207,14 @@ class ChallengeTimingOut(ResponseModel):
     # 안 된다는 피드백으로 넣었다. 0이면 바로 다음 판정으로 간다.
     step_prepare_ms: float = Field(default=1500.0, ge=0.0, le=10000.0)
 
+    # 단계 결과(PASS/FAIL)를 보여주는 시간.
+    #
+    # 동작을 맞게 해도 순식간에 넘어가 제대로 한 건지 인지가 안 된다는 피드백으로
+    # 넣었다. 이 동안에도 제한 시간이 흐르지 않는다. 0이면 바로 넘어간다.
+    #
+    # 순서: 동작 통과 → PASS 표시 → 다음 동작 준비 → 판정
+    step_result_hold_ms: float = Field(default=1500.0, ge=0.0, le=10000.0)
+
 
 class ChallengeTrackingOut(ResponseModel):
     max_lost_frames: int = Field(ge=1, le=300)

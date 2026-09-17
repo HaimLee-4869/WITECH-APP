@@ -41,6 +41,7 @@ ChallengeConfig smConfig([Map<String, dynamic> overrides = const {}]) =>
         // wait_hand_test.dart, step_prepare_test.dart에서 따로 본다.
         'waitHandReadyMs': 0,
         'stepPrepareMs': 0,
+        'stepResultHoldMs': 0,
       },
       'tracking': <String, dynamic>{'maxLostFrames': 5, 'minDetectionScore': 0.5},
     }, overrides));

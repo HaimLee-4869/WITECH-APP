@@ -43,6 +43,13 @@ String challengeActionLabel(String action) => switch (action) {
 
 /// 지금 화면에 띄울 한 줄. 상태에 따라 사용자가 할 일이 다르다.
 String challengePrompt(Status status) {
+  if (status.stepResult != null) {
+    // 결과는 원 위 배지가 크게 보여준다. 아래 문구는 조용히 둔다.
+    final int? done = status.justPassedStep;
+    return status.stepResult == StepOutcome.pass && done != null
+        ? '${done + 1}단계 완료'
+        : '';
+  }
   if (status.preparing) {
     // 방금 뭘 했는지 알려주고, 다음 동작을 준비할 시간을 준다.
     final int? done = status.justPassedStep;

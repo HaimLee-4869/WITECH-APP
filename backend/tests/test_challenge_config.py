@@ -35,6 +35,8 @@ def test_config_includes_challenge(client):
         "waitHandReadyMs": 400, "waitHandTimeoutMs": 15000,
         # 단계 사이에 동작을 준비할 시간 (제한 시간이 흐르지 않는다)
         "stepPrepareMs": 1500,
+        # 단계 결과(PASS/FAIL)를 보여주는 시간 (역시 흐르지 않는다)
+        "stepResultHoldMs": 1500,
     }
     assert body["steps"] == {"numShapes": 2, "numMoves": 1}
 
@@ -244,3 +246,15 @@ def test_step_prepare_is_adjustable(client):
     timing = res.json()["challenge"]["timing"]
     assert timing["stepPrepareMs"] == 2500
     assert timing["perActionTimeoutMs"] == 2000  # 나머지는 그대로
+
+
+def test_step_result_hold_is_adjustable(client):
+    """PASS/FAIL 표시 시간도 실기기 체감으로 조정한다."""
+    res = client.patch(
+        "/admin/config", json={"challenge": {"timing": {"stepResultHoldMs": 2500}}}
+    )
+    assert res.status_code == 200
+    timing = res.json()["challenge"]["timing"]
+    assert timing["stepResultHoldMs"] == 2500
+    assert timing["stepPrepareMs"] == 1500      # 나머지는 그대로
+    assert timing["perActionTimeoutMs"] == 2000

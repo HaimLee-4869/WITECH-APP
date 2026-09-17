@@ -118,6 +118,14 @@ class TimingConfig {
   /// [perActionTimeoutMs]가 흐르지 않는다.** 0이면 바로 다음 판정으로 간다.
   final double stepPrepareMs;
 
+  /// 단계 결과(PASS/FAIL)를 보여주는 시간.
+  ///
+  /// 동작을 맞게 해도 순식간에 넘어가면 제대로 한 건지 인지가 안 된다.
+  /// **이 동안에도 제한 시간이 흐르지 않는다.** 0이면 바로 넘어간다.
+  ///
+  /// 순서: 동작 통과 → PASS 표시 → 다음 동작 준비([stepPrepareMs]) → 판정
+  final double stepResultHoldMs;
+
   const TimingConfig({
     required this.perActionTimeoutMs,
     required this.totalTimeoutMs,
@@ -125,6 +133,7 @@ class TimingConfig {
     required this.waitHandReadyMs,
     required this.waitHandTimeoutMs,
     required this.stepPrepareMs,
+    required this.stepResultHoldMs,
   });
 
   factory TimingConfig.fromJson(Map<String, dynamic> json) => TimingConfig(
@@ -137,6 +146,8 @@ class TimingConfig {
             (json['waitHandTimeoutMs'] as num?)?.toDouble() ?? 15000.0,
         // 설정에 없으면 대기 없음(옛 동작). 서버는 항상 값을 준다.
         stepPrepareMs: (json['stepPrepareMs'] as num?)?.toDouble() ?? 0.0,
+        stepResultHoldMs:
+            (json['stepResultHoldMs'] as num?)?.toDouble() ?? 0.0,
       );
 }
 

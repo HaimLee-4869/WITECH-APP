@@ -32,7 +32,8 @@
     "maxRetries": 1,
     "waitHandReadyMs": 400,
     "waitHandTimeoutMs": 15000,
-    "stepPrepareMs": 1500
+    "stepPrepareMs": 1500,
+    "stepResultHoldMs": 1500
   },
   "tracking": {
     "maxLostFrames": 38,

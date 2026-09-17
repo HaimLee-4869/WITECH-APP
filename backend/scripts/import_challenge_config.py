@@ -113,7 +113,7 @@ def convert(source: dict, previous: dict) -> dict:
         if key in tracking:
             _set(out, f"tracking.{key}", tracking[key])
     timing = previous.get("timing", {})
-    for key in ("waitHandReadyMs", "waitHandTimeoutMs", "stepPrepareMs"):
+    for key in ("waitHandReadyMs", "waitHandTimeoutMs", "stepPrepareMs", "stepResultHoldMs"):
         if key in timing:
             _set(out, f"timing.{key}", timing[key])
     return out
