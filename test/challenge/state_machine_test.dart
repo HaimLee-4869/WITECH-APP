@@ -18,7 +18,7 @@ const double kFrameMs = 1000.0 / kFps;
 
 /// Python 테스트의 CONFIG와 같은 값.
 ChallengeConfig smConfig([Map<String, dynamic> overrides = const {}]) =>
-    configWith(<String, dynamic>{
+    configWith(deepMergeMaps(<String, dynamic>{
       'angleSpace': 'world',
       'coordinateFrame': 'raw',
       'fingerExtendedAngle': <String, dynamic>{'thumb': 150.0, 'others': 160.0},
@@ -37,10 +37,11 @@ ChallengeConfig smConfig([Map<String, dynamic> overrides = const {}]) =>
         'perActionTimeoutMs': 2000,
         'totalTimeoutMs': 9000,
         'maxRetries': 0,
+        // 이 파일은 판정 규칙을 본다. 대기 단계는 wait_hand_test.dart에서 따로 본다.
+        'waitHandReadyMs': 0,
       },
       'tracking': <String, dynamic>{'maxLostFrames': 5, 'minDetectionScore': 0.5},
-      ...overrides,
-    });
+    }, overrides));
 
 Coords shapeHand(String label) => makePatternHand(
       extended: <String, bool>{
@@ -355,17 +356,37 @@ void main() {
   });
 
   group('추적', () {
-    test('손이 한 번도 안 잡히면 HAND_NOT_FOUND', () {
+    test('손을 들기 전에는 끝나지 않는다', () {
+      // 2026-09-18 이전에는 maxLostFrames+1(약 1.25초) 만에 HAND_NOT_FOUND로
+      // 끝나서, 사용자가 손을 들 시간이 없었다.
       final ChallengeStateMachine sm =
           build(<String>['OPEN_PALM', 'FIST', 'MOVE_RIGHT']);
-      Status? status;
-      for (int i = 0; i < sm.config.tracking.maxLostFrames + 2; i++) {
-        status = sm.update(
+      for (int i = 0; i < 200; i++) {
+        final Status s = sm.update(
           Observation(timestampMs: i * kFrameMs, handFound: false),
         );
+        expect(s.state, ChallengeState.waitHand, reason: '$i번째에 끝났다');
       }
-      expect(status!.state, ChallengeState.failed);
+      expect(sm.steps.every((StepResult s) => s.retriesUsed == 0), isTrue);
+    });
+
+    test('대기 제한(안전장치)까지 지나면 HAND_NOT_FOUND', () {
+      final ChallengeStateMachine sm = build(
+        <String>['OPEN_PALM', 'FIST', 'MOVE_RIGHT'],
+        smConfig(<String, dynamic>{
+          'timing': <String, dynamic>{'waitHandTimeoutMs': 1000},
+        }),
+      );
+      Status? status;
+      double t = 0.0;
+      while (status == null || !status.finished) {
+        status = sm.update(Observation(timestampMs: t, handFound: false));
+        t += kFrameMs;
+        if (t > 5000) break;
+      }
+      expect(status.state, ChallengeState.failed);
       expect(status.failReason, FailReason.handNotFound);
+      expect(t, greaterThanOrEqualTo(1000.0));
     });
 
     test('도중에 손이 사라지면 HAND_LOST', () {
@@ -520,21 +541,27 @@ void main() {
     });
 
     test('손 소실 판정도 시간 기준이다', () {
+      // 손 소실 관문은 **1단계가 시작된 뒤**에만 돈다. 손을 들기 전에는
+      // 대기 단계라 아무 시계도 흐르지 않는다.
       final ChallengeStateMachine sm =
           build(<String>['OPEN_PALM', 'FIST', 'MOVE_RIGHT']);
       // maxLostFrames=5 → +1 해서 6프레임 연속 = 4.5 × 33.3ms = 150ms
       final double requiredMs = sm.config.consecutiveMs(6);
       expect(requiredMs, closeTo(150.0, 0.1));
 
+      // 먼저 손을 들어 1단계를 시작시킨다 (waitHandReadyMs=0이라 한 프레임이면 된다)
+      sm.update(obs(0.0, hand: shapeHand('OPEN_PALM')));
+      expect(sm.state, ChallengeState.action);
+
       // 14fps로 넣으면 3프레임이면 시간이 찬다
       const double slowFrameMs = 1000.0 / 14.0;
       Status? status;
-      for (int i = 0; i < 4; i++) {
+      for (int i = 1; i <= 4; i++) {
         status = sm.update(
           Observation(timestampMs: i * slowFrameMs, handFound: false),
         );
       }
-      expect(status!.failReason, FailReason.handNotFound);
+      expect(status!.failReason, FailReason.handLost);
     });
   });
 }

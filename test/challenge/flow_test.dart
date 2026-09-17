@@ -192,13 +192,39 @@ void main() {
     expect(source.stopped, isTrue);
   });
 
-  test('손을 들지 않으면 HAND_NOT_FOUND로 끝난다', () async {
+  test('손을 들지 않아도 바로 끝나지 않는다 (대기 단계)', () async {
+    // 화면이 뜨자마자 판정이 시작되면 손을 들기도 전에 끝난다.
     await controller().begin();
-    // 워치독이 '손 없음' 관측을 만들어 넣는다. 스트림에는 아무것도 흘리지 않는다.
     await Future<void>.delayed(const Duration(milliseconds: 2500));
 
-    expect(flow().phase, ChallengePhase.failed);
-    expect(flow().status!.failReason, FailReason.handNotFound);
+    expect(flow().phase, ChallengePhase.running);
+    expect(flow().status!.state, ChallengeState.waitHand);
+    expect(flow().status!.awaitingHand, isTrue);
+  });
+
+  test('대기 제한(안전장치)까지 지나면 HAND_NOT_FOUND', () async {
+    config = configWith(<String, dynamic>{
+      'timing': <String, dynamic>{
+        'perActionTimeoutMs': 4000,
+        'totalTimeoutMs': 30000,
+        'maxRetries': 0,
+        'waitHandTimeoutMs': 800,
+      },
+    });
+    final ProviderContainer short = ProviderContainer(
+      overrides: [
+        landmarkSourceProvider.overrideWithValue(source),
+        serverConfigProvider.overrideWith(() => _StubConfig(config)),
+      ],
+    );
+    addTearDown(short.dispose);
+
+    await short.read(challengeControllerProvider.notifier).begin();
+    await Future<void>.delayed(const Duration(milliseconds: 1500));
+
+    final ChallengeFlowState state = short.read(challengeControllerProvider);
+    expect(state.phase, ChallengePhase.failed);
+    expect(state.status!.failReason, FailReason.handNotFound);
   });
 
   test('요청과 다른 손 모양만 하면 실패한다', () async {

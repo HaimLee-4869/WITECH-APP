@@ -102,6 +102,48 @@ class FrameSpan:
         return min(self.elapsed_ms / self.required_ms, 1.0)
 
 
+class MsSpan:
+    """"이만큼 연속으로" 를 ms로 직접 잰다.
+
+    FrameSpan과 달리 기준 fps 환산을 하지 않는다. 파일럿 영상에서 도출한 임계값이
+    아니라 화면 흐름을 위한 대기 시간이기 때문이다.
+    """
+
+    def __init__(self, required_ms: float):
+        self.required_ms = float(required_ms)
+        self.start_ms: Optional[float] = None
+        self.last_ms: Optional[float] = None
+
+    def hit(self, timestamp_ms: float) -> bool:
+        if self.start_ms is None:
+            self.start_ms = timestamp_ms
+        self.last_ms = timestamp_ms
+        return self.done
+
+    def reset(self) -> None:
+        self.start_ms = self.last_ms = None
+
+    @property
+    def active(self) -> bool:
+        return self.start_ms is not None
+
+    @property
+    def elapsed_ms(self) -> float:
+        return 0.0 if self.start_ms is None else self.last_ms - self.start_ms
+
+    @property
+    def done(self) -> bool:
+        return self.active and self.elapsed_ms >= self.required_ms
+
+    @property
+    def progress(self) -> float:
+        if not self.active:
+            return 0.0
+        if self.required_ms <= 0:
+            return 1.0
+        return min(self.elapsed_ms / self.required_ms, 1.0)
+
+
 class TimeWindow:
     """이동 판정 윈도우. 기준 fps에서 window_frames 프레임이 차지하는 시간만큼 담는다."""
 
@@ -264,10 +306,16 @@ class Status:
     move_probe: Optional[MoveProbe] = None   # 이동 단계에서만 채워진다
     escape_from: Optional[str] = None        # 벗어나야 하는 이전 손 모양
     escape_progress: float = 1.0             # 0.0~1.0, 1.0이면 관문 열림
+    hand_ready_progress: float = 0.0         # WAIT_HAND에서 손이 연속으로 잡힌 정도
 
     @property
     def awaiting_escape(self) -> bool:
         return self.escape_from is not None and self.escape_progress < 1.0
+
+    @property
+    def awaiting_hand(self) -> bool:
+        """손을 들기를 기다리는 중인지. 이 동안에는 제한 시간이 흐르지 않는다."""
+        return self.state == State.WAIT_HAND
 
     @property
     def finished(self) -> bool:
@@ -289,6 +337,12 @@ class ChallengeStateMachine:
         self.per_action_timeout_ms = float(timing["per_action_timeout_ms"])
         self.total_timeout_ms = float(timing["total_timeout_ms"])
         self.max_retries = int(timing["max_retries"])
+        # 손이 이만큼 연속으로 잡혀야 1단계를 시작한다. 그 전에는 제한 시간이 흐르지
+        # 않고 재시도도 차감되지 않는다. 화면이 뜨자마자 판정이 시작되면 손을 들기도
+        # 전에 시간이 지나간다(실기기에서 겪었다). 0이면 첫 프레임에 바로 시작한다.
+        self.wait_hand_ready_ms = float(timing.get("wait_hand_ready_ms", 0.0))
+        # 손을 아예 들지 않을 때 대기를 끝내는 안전장치. 판정 제한이 아니다.
+        self.wait_hand_timeout_ms = float(timing.get("wait_hand_timeout_ms", 15000.0))
 
         tracking = config["tracking"]
         self.max_lost_frames = int(tracking["max_lost_frames"])
@@ -318,10 +372,14 @@ class ChallengeStateMachine:
         self.fail_reason: Optional[FailReason] = None
         self.steps: list[StepResult] = [StepResult(a) for a in challenge.actions]
 
+        # 1단계가 **시작된** 시각. 대기 중에는 None이고 전체 제한도 흐르지 않는다.
         self._started_ms: Optional[float] = None
+        # 화면에 들어온 시각. 대기 제한(안전장치)만 여기서 잰다.
+        self._wait_started_ms: Optional[float] = None
         self._step_started_ms: Optional[float] = None
         self._now_ms: float = 0.0
         self._frame_delta_ms: float = 0.0
+        self._hand_ready = MsSpan(self.wait_hand_ready_ms)
         self._hold = FrameSpan(self.hold_frames, self.reference_fps)
         self._wrong_label: Optional[str] = None
         self._wrong = FrameSpan(self.hold_frames, self.reference_fps)
@@ -345,8 +403,10 @@ class ChallengeStateMachine:
 
     def start(self, timestamp_ms: float) -> None:
         self.state = State.WAIT_HAND
-        self._started_ms = timestamp_ms
-        self._step_started_ms = timestamp_ms
+        # ⚠️ _started_ms는 여기서 정하지 않는다. 손을 들기 전까지 전체 제한 시간이
+        # 흐르면 안 된다. 1단계가 시작될 때 정한다.
+        self._wait_started_ms = timestamp_ms
+        self._step_started_ms = None
         self._now_ms = timestamp_ms
 
     def update(self, obs: Observation) -> Status:
@@ -358,17 +418,19 @@ class ChallengeStateMachine:
         self._frame_delta_ms = max(obs.timestamp_ms - self._now_ms, 0.0)
         self._now_ms = obs.timestamp_ms
 
+        # 손을 들기를 기다리는 동안은 아무 시계도 흐르지 않는다.
+        # None을 돌려주면 이 프레임부터 바로 판정에 들어간다.
+        if self.state == State.WAIT_HAND:
+            waiting = self._update_wait(obs)
+            if waiting is not None:
+                return waiting
+
         if obs.timestamp_ms - self._started_ms > self.total_timeout_ms:
             return self._fail(FailReason.TOTAL_TIMEOUT, obs.timestamp_ms)
 
         tracking_status = self._update_tracking(obs)
         if tracking_status is not None:
             return tracking_status
-
-        if self.state == State.WAIT_HAND:
-            self.state = State.ACTION
-            self._step_started_ms = obs.timestamp_ms
-            self._hold.reset()
 
         action = self.current_action
         if action is None:
@@ -386,6 +448,32 @@ class ChallengeStateMachine:
         return status
 
     # ------------------------------------------------------------ 내부
+
+    def _update_wait(self, obs: Observation) -> Optional[Status]:
+        """손이 원 안에 들어오기를 기다린다.
+
+        **제한 시간을 소모하지 않고 재시도도 차감하지 않는다.** 이 단계가 없으면
+        화면이 뜨자마자 판정이 시작되고, 손 소실 관문까지 돌아 1.25초 만에
+        HAND_NOT_FOUND로 끝난다(실기기에서 실제로 그랬다).
+        """
+        if not obs.hand_found:
+            self._hand_ready.reset()
+            # 손을 아예 들지 않으면 세션이 멈춰 있게 된다. 안전장치로만 끝낸다.
+            if obs.timestamp_ms - self._wait_started_ms > self.wait_hand_timeout_ms:
+                return self._fail(FailReason.HAND_NOT_FOUND, obs.timestamp_ms)
+            return self._status()
+
+        if not self._hand_ready.hit(obs.timestamp_ms):
+            return self._status()
+
+        # 여기서부터 제한 시간이 흐른다. 이 프레임도 판정에 쓴다(None을 돌려준다).
+        self.state = State.ACTION
+        self._started_ms = obs.timestamp_ms
+        self._step_started_ms = obs.timestamp_ms
+        self._hold.reset()
+        self._lost.reset()
+        self._unstable.reset()
+        return None
 
     def _update_tracking(self, obs: Observation) -> Optional[Status]:
         """손 소실/추적 불안정을 처리한다. 실패면 Status, 아니면 None."""
@@ -607,4 +695,5 @@ class ChallengeStateMachine:
             move_probe=move_probe,
             escape_from=self._escape_from if self._escape_pending() else None,
             escape_progress=self._escape_progress(),
+            hand_ready_progress=self._hand_ready.progress,
         )

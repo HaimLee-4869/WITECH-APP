@@ -234,6 +234,11 @@ class Status {
   /// 0.0~1.0, 1.0이면 관문이 열렸다.
   final double escapeProgress;
 
+  /// 손이 연속으로 잡힌 정도. `waitHand`에서만 의미가 있다. 0.0~1.0.
+  ///
+  /// 1.0이 되면 1단계가 시작되고 그때부터 제한 시간이 흐른다.
+  final double handReadyProgress;
+
   const Status({
     required this.state,
     required this.stepIndex,
@@ -248,6 +253,7 @@ class Status {
     required this.moveProbe,
     required this.escapeFrom,
     required this.escapeProgress,
+    this.handReadyProgress = 0.0,
   });
 
   /// 이탈 관문이 닫혀 있어 대기 중인지. 이 동안 제한 시간은 흐르지 않는다.
@@ -255,6 +261,9 @@ class Status {
 
   bool get finished =>
       state == ChallengeState.passed || state == ChallengeState.failed;
+
+  /// 손을 들기를 기다리는 중인지. 이 동안에는 제한 시간이 흐르지 않는다.
+  bool get awaitingHand => state == ChallengeState.waitHand;
 
   int get totalSteps => steps.length;
 }
@@ -272,6 +281,7 @@ class ChallengeStateMachine {
 
   final double _perActionTimeoutMs;
   final double _totalTimeoutMs;
+  final double _waitHandTimeoutMs;
   final int _maxRetries;
   final double _minDetectionScore;
 
@@ -281,11 +291,19 @@ class ChallengeStateMachine {
   final TimeWindow _window;
   final FrameSpan _hold;
   final FrameSpan _wrong;
+
+  /// 손이 연속으로 잡힌 시간. [ChallengeState.waitHand]에서만 쓴다.
+  final _HandReadySpan _handReady;
   final FrameSpan _escape;
   final FrameSpan _lost;
   final FrameSpan _unstable;
 
+  /// 1단계가 **시작된** 시각. 대기 중에는 null이고 전체 제한도 흐르지 않는다.
   double? _startedMs;
+
+  /// 화면에 들어온 시각. 대기 제한(안전장치)만 여기서 잰다.
+  double? _waitStartedMs;
+
   double? _stepStartedMs;
   double _nowMs = 0.0;
   double _frameDeltaMs = 0.0;
@@ -314,6 +332,7 @@ class ChallengeStateMachine {
         ],
         _perActionTimeoutMs = config.timing.perActionTimeoutMs,
         _totalTimeoutMs = config.timing.totalTimeoutMs,
+        _waitHandTimeoutMs = config.timing.waitHandTimeoutMs,
         _maxRetries = config.timing.maxRetries,
         _minDetectionScore = config.tracking.minDetectionScore,
         _shapeConfidenceMin = config.shapeConfidenceMin,
@@ -322,6 +341,7 @@ class ChallengeStateMachine {
           MovementDetector(config).windowFrames(config.frameReferenceFps),
           config,
         ),
+        _handReady = _HandReadySpan(config.timing.waitHandReadyMs),
         _hold = FrameSpan(config.shapeHoldFrames, config),
         _wrong = FrameSpan(config.shapeHoldFrames, config),
         _escape = FrameSpan(config.escapeFrames, config),
@@ -334,8 +354,10 @@ class ChallengeStateMachine {
 
   void start(double timestampMs) {
     state = ChallengeState.waitHand;
-    _startedMs = timestampMs;
-    _stepStartedMs = timestampMs;
+    // ⚠️ _startedMs는 여기서 정하지 않는다. 손을 들기 전까지는 전체 제한 시간이
+    // 흐르면 안 된다. 1단계가 시작될 때 정한다.
+    _waitStartedMs = timestampMs;
+    _stepStartedMs = null;
     _nowMs = timestampMs;
   }
 
@@ -351,18 +373,19 @@ class ChallengeStateMachine {
     _frameDeltaMs = delta > 0.0 ? delta : 0.0;
     _nowMs = obs.timestampMs;
 
+    // 손을 들기를 기다리는 동안은 아무 시계도 흐르지 않는다.
+    // null을 돌려주면 이 프레임부터 바로 판정에 들어간다.
+    if (state == ChallengeState.waitHand) {
+      final Status? waiting = _updateWait(obs);
+      if (waiting != null) return waiting;
+    }
+
     if (obs.timestampMs - _startedMs! > _totalTimeoutMs) {
       return _fail(FailReason.totalTimeout, obs.timestampMs);
     }
 
     final Status? tracking = _updateTracking(obs);
     if (tracking != null) return tracking;
-
-    if (state == ChallengeState.waitHand) {
-      state = ChallengeState.action;
-      _stepStartedMs = obs.timestampMs;
-      _hold.reset();
-    }
 
     final String? action = currentAction;
     if (action == null) return _status();
@@ -381,6 +404,37 @@ class ChallengeStateMachine {
   }
 
   // ------------------------------------------------------------ 내부
+
+  /// 손이 원 안에 들어오기를 기다린다.
+  ///
+  /// **제한 시간을 소모하지 않고 재시도도 차감하지 않는다.** 화면이 뜨자마자
+  /// 판정이 시작되면 손을 들기도 전에 시간이 지나가고, 손 소실 관문까지 돌아
+  /// 1.25초 만에 `HAND_NOT_FOUND`로 끝난다. 인증 화면의 `handSearching`과 같은
+  /// 자리다.
+  Status? _updateWait(Observation obs) {
+    if (!obs.handFound) {
+      _handReady.reset();
+      // 손을 아예 들지 않으면 화면이 멈춰 있게 된다. 안전장치로만 끝낸다.
+      if (obs.timestampMs - _waitStartedMs! > _waitHandTimeoutMs) {
+        return _fail(FailReason.handNotFound, obs.timestampMs);
+      }
+      return _status();
+    }
+
+    if (!_handReady.hit(obs.timestampMs)) {
+      // 아직 충분히 연속되지 않았다. 진행도만 보여준다.
+      return _status();
+    }
+
+    // 여기서부터 제한 시간이 흐른다. 이 프레임도 판정에 쓴다(null을 돌려준다).
+    state = ChallengeState.action;
+    _startedMs = obs.timestampMs;
+    _stepStartedMs = obs.timestampMs;
+    _hold.reset();
+    _lost.reset();
+    _unstable.reset();
+    return null;
+  }
 
   /// 손 소실/추적 불안정 처리. 실패면 Status, 아니면 null.
   Status? _updateTracking(Observation obs) {
@@ -610,6 +664,7 @@ class ChallengeStateMachine {
       if (_stepStartedMs != null) {
         step.elapsedMs = timestampMs - _stepStartedMs!;
       }
+      // 대기 중 실패(HAND_NOT_FOUND)면 단계가 시작된 적이 없다. 0으로 둔다.
     }
     return _status();
   }
@@ -639,6 +694,45 @@ class ChallengeStateMachine {
       moveProbe: moveProbe,
       escapeFrom: _escapePending ? _escapeFrom : null,
       escapeProgress: _escapeProgress,
+      handReadyProgress: _handReady.progress,
     );
+  }
+}
+
+/// "손이 이만큼 연속으로 잡혔다"를 시간으로 잰다.
+///
+/// [FrameSpan]과 달리 프레임 수가 아니라 ms를 직접 받는다. 이 값은 파일럿 영상에서
+/// 도출한 임계값이 아니라 화면 흐름을 위한 대기 시간이라, 기준 fps 환산을 하지 않는다.
+class _HandReadySpan {
+  final double requiredMs;
+
+  double? _startMs;
+  double? _lastMs;
+
+  _HandReadySpan(this.requiredMs);
+
+  /// 손이 잡힌 프레임 하나. 연속 구간이 요구 길이에 닿았으면 true.
+  bool hit(double timestampMs) {
+    _startMs ??= timestampMs;
+    _lastMs = timestampMs;
+    return done;
+  }
+
+  void reset() {
+    _startMs = null;
+    _lastMs = null;
+  }
+
+  bool get active => _startMs != null;
+
+  double get elapsedMs => _startMs == null ? 0.0 : _lastMs! - _startMs!;
+
+  bool get done => active && elapsedMs >= requiredMs;
+
+  double get progress {
+    if (!active) return 0.0;
+    if (requiredMs <= 0) return 1.0;
+    final double p = elapsedMs / requiredMs;
+    return p > 1.0 ? 1.0 : p;
   }
 }

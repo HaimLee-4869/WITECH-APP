@@ -192,6 +192,14 @@ class ChallengeTimingOut(ResponseModel):
     total_timeout_ms: float = Field(gt=0.0, le=60000.0)
     max_retries: int = Field(ge=0, le=5)
 
+    # 손이 이만큼 연속으로 잡혀야 1단계를 시작한다. 그 전에는 제한 시간이 흐르지
+    # 않고 재시도도 차감되지 않는다. 앱 인증 화면의 kHandReadyDuration과 같은 값이다.
+    wait_hand_ready_ms: float = Field(default=400.0, ge=0.0, le=5000.0)
+
+    # 손을 아예 들지 않을 때 대기를 끝내는 시간. 판정 제한이 아니라 화면이
+    # 영원히 멈춰 있지 않게 하는 안전장치다.
+    wait_hand_timeout_ms: float = Field(default=15000.0, gt=0.0, le=120000.0)
+
 
 class ChallengeTrackingOut(ResponseModel):
     max_lost_frames: int = Field(ge=1, le=300)

@@ -1288,8 +1288,8 @@
           "frames": 20
         }
       ],
-      "state": "FAIL",
-      "failReason": "HAND_NOT_FOUND",
+      "state": "WAIT_HAND",
+      "failReason": null,
       "stepIndex": 0,
       "stepsPassed": [
         false,

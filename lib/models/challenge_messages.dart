@@ -43,6 +43,10 @@ String challengeActionLabel(String action) => switch (action) {
 
 /// 지금 화면에 띄울 한 줄. 상태에 따라 사용자가 할 일이 다르다.
 String challengePrompt(Status status) {
+  if (status.awaitingHand) {
+    // 손을 들기 전까지는 제한 시간이 흐르지 않는다. 인증 화면과 같은 문구를 쓴다.
+    return '손을 원 안에 위치시켜 주세요';
+  }
   if (status.awaitingEscape) {
     // 이전 모양 그대로면 판정을 시작하지 않는다. 그 이유를 알려줘야 사용자가
     // "왜 안 넘어가지"에서 멈추지 않는다.

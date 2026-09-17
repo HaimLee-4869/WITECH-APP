@@ -26,6 +26,13 @@ ChallengeConfig configWith([Map<String, dynamic> overrides = const {}]) {
 /// 방향 하나만 바뀐 표가 생기면 나머지가 옛 도출값으로 남아 조용히 어긋난다.
 const Set<String> _replaceWhole = <String>{'directionMap'};
 
+/// 테스트 픽스처끼리 겹쳐 쓸 때. `configWith`와 같은 규칙이다.
+Map<String, dynamic> deepMergeMaps(
+  Map<String, dynamic> base,
+  Map<String, dynamic> patch,
+) =>
+    _deepMerge(base, patch);
+
 Map<String, dynamic> _deepMerge(
   Map<String, dynamic> base,
   Map<String, dynamic> patch,

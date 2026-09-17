@@ -100,16 +100,34 @@ class TimingConfig {
   /// 단계 실패 시 다시 시도할 횟수. 측정값이 아니라 프로토콜 정책이다.
   final int maxRetries;
 
+  /// 손이 이만큼 연속으로 잡혀야 1단계를 시작한다.
+  ///
+  /// 그 전에는 [perActionTimeoutMs]도 [totalTimeoutMs]도 흐르지 않고 재시도도
+  /// 차감되지 않는다. 화면이 뜨자마자 판정이 시작되면 손을 들기도 전에 시간이
+  /// 지나간다. 앱 인증 화면의 `kHandReadyDuration`과 같은 값이다.
+  final double waitHandReadyMs;
+
+  /// 손을 아예 들지 않을 때 대기를 끝내는 시간.
+  ///
+  /// 판정 제한이 아니라 화면이 영원히 멈춰 있지 않게 하는 안전장치다.
+  final double waitHandTimeoutMs;
+
   const TimingConfig({
     required this.perActionTimeoutMs,
     required this.totalTimeoutMs,
     required this.maxRetries,
+    required this.waitHandReadyMs,
+    required this.waitHandTimeoutMs,
   });
 
   factory TimingConfig.fromJson(Map<String, dynamic> json) => TimingConfig(
         perActionTimeoutMs: (json['perActionTimeoutMs'] as num).toDouble(),
         totalTimeoutMs: (json['totalTimeoutMs'] as num).toDouble(),
         maxRetries: (json['maxRetries'] as num).toInt(),
+        // 설정에 없으면 대기 없음(옛 동작). 서버는 항상 값을 준다.
+        waitHandReadyMs: (json['waitHandReadyMs'] as num?)?.toDouble() ?? 0.0,
+        waitHandTimeoutMs:
+            (json['waitHandTimeoutMs'] as num?)?.toDouble() ?? 15000.0,
       );
 }
 

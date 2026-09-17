@@ -322,6 +322,16 @@ HomeScreen → ChallengeScreen → AuthScreen → ResultScreen
              (안티스푸핑)       (제스처 인증)
 ```
 
+Challenge는 **손이 원 안에 들어올 때까지 기다린 뒤** 시작한다. 대기 중에는
+제한 시간이 흐르지 않고 재시도도 차감되지 않는다. 인증 화면의 `handSearching`과
+같은 자리다.
+
+```
+waitHand   "손을 원 안에 위치시켜 주세요". 테두리 = 회색. **시계 멈춤**
+   ↓ 400ms 연속 검출 (timing.waitHandReadyMs)
+ACTION 1~3  여기서부터 perActionTimeoutMs와 totalTimeoutMs가 흐른다
+```
+
 ### 캡처 상태 머신
 
 `lib/state/auth_flow_controller.dart` + `lib/state/capture_session.dart`.
@@ -587,13 +597,39 @@ req=MOVE_LEFT axis=y+ (축비 47.25) label=MOVE_DOWN
 
 `frameStaleFactor`는 **측정값이 아니라 정책값**이다. 실기기 체감으로 조정한다.
 
+### 손이 사라졌을 때 (검토 결과)
+
+**지금 값을 유지한다.** `maxLostFrames`(38프레임 = 30fps 기준 약 1.25초)를 넘겨
+손이 안 보이면 `HAND_LOST`로 끝나고, 이 사유는 재시도 대상이 아니다.
+
+느슨하게 풀지 않은 이유:
+
+- **보안 관문이다.** 손을 프레임 밖으로 빼는 것(`NEG_exit`)이 안티스푸핑이 막으려는
+  공격 중 하나다. 재시도로 회복되게 하면 손을 감췄다 나타내며 무한히 다시 시도할 수 있다.
+- **1.25초는 짧지 않다.** 사용자가 겪던 "금방 실패한다"의 상당 부분은 **손을 들기 전**
+  이 관문이 돌던 것이었고, 그건 대기 단계로 해결됐다.
+- **근거 없이 바꾸지 않는다.** 38은 측정값이 아니라 임시값이다. 어느 방향으로 옮기든
+  지금은 근거가 없다.
+
+대신 **실제로 얼마나 자주 나는지 먼저 잰다.** 로그에 이미 남는다:
+
+```bash
+curl -s localhost:8000/debug/challenge | grep -c 'reason=HAND_LOST'
+```
+
+정상 사용자에게 자주 뜨면 서버에서 올린다(앱 재배포 없음):
+
+```bash
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json'   -d '{"challenge": {"tracking": {"maxLostFrames": 60}}}'
+```
+
 ### Challenge의 알려진 한계
 
 | 한계 | 상세 |
 |---|---|
 | **앱 판정** | 앱을 조작하면 우회된다. 서버가 검증하지 않는다 (위 참고) |
 | **검출 신뢰도 관문이 꺼져 있다** | `minDetectionScore=0.938`을 받지만 `hand_landmarker` 3.0.1이 신뢰도를 주지 않는다. 앱은 `HandFrame.score`에 `minHandDetectionConfidence`(0.6)를 **하한값**으로 넣는데, 이건 "0.6 이상"이라는 뜻이지 측정값이 아니다. 측정하지 않은 값으로 관문을 판정할 수 없으므로 `LandmarkSource.providesDetectionScore`가 false인 소스는 관문을 건너뛴다. **결과적으로 `TRACKING_UNSTABLE`은 앱에서 발생하지 않고, 흔들리는 손을 거를 관문 하나가 없는 상태다.** 플러그인이 진짜 신뢰도를 주면 그 플래그만 true로 바꾸면 관문이 살아난다 |
-| **`maxLostFrames`가 측정값이 아니다** | 38은 임시값이다. 정상 영상의 중간 끊김이 1건뿐이라(최소 20건 필요) p95를 도출하지 못했고, 2026-09-16에 임시로 정한 값이다. 30fps 기준 1,267ms에 해당한다. **실사용 세션이 쌓이면 다시 재야 한다** |
+| **`maxLostFrames`가 측정값이 아니다** | 38은 임시값이다(30fps 기준 약 1.25초). 정상 영상의 중간 끊김이 1건뿐이라(최소 20건 필요) p95를 도출하지 못했고, 2026-09-16에 임시로 정한 값이다. 30fps 기준 1,267ms에 해당한다. **실사용 세션이 쌓이면 다시 재야 한다** |
 | 1단계에는 이탈 관문이 없다 | 시작 시점에 이미 1단계 손 모양이면 그대로 통과된다. 매번 시작 자세를 요구하는 비용이 더 크다고 봤다(challenge_response README 5.7). 2·3단계에는 관문이 있어 정지된 손 하나로 전체를 통과할 수는 없다 |
 | 이동 방향 근거가 좁다 | `directionMap`의 상하는 참가자 1명(P05)의 영상 4개에 기댄다 |
 | `shapeConfidenceMin`이 null | 분포가 겹쳐 도출하지 못했다. 신뢰도 게이트를 끈 채로 간다 |

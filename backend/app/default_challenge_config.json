@@ -29,7 +29,9 @@
   "timing": {
     "perActionTimeoutMs": 2000,
     "totalTimeoutMs": 6000,
-    "maxRetries": 1
+    "maxRetries": 1,
+    "waitHandReadyMs": 400,
+    "waitHandTimeoutMs": 15000
   },
   "tracking": {
     "maxLostFrames": 38,

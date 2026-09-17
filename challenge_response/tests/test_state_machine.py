@@ -260,13 +260,48 @@ def test_total_timeout_beats_per_action_timeout():
     assert status.fail_reason is FailReason.TOTAL_TIMEOUT
 
 
-def test_hand_never_appearing_gives_hand_not_found():
+def test_waiting_for_the_hand_does_not_fail_early():
+    """손을 들기 전에는 제한 시간도 손 소실 관문도 돌지 않는다 (2026-09-18).
+
+    이게 없으면 화면이 뜨자마자 판정이 시작되고, max_lost_frames+1(약 1.25초) 만에
+    HAND_NOT_FOUND로 끝난다. 사용자가 손을 들 시간이 없다.
+    """
     sm = build(["OPEN_PALM", "FIST", "MOVE_RIGHT"])
-    status = None
-    for i in range(CONFIG["tracking"]["max_lost_frames"] + 2):
+    for i in range(200):                       # 6.6초. total_timeout_ms보다 길다
         status = sm.update(Observation(i * FRAME_MS, hand_found=False))
+        assert status.state is State.WAIT_HAND, f"{i}번째 프레임에서 끝났다"
+    assert all(step.retries_used == 0 for step in sm.steps)
+
+
+def test_hand_never_appearing_gives_hand_not_found():
+    """대기 제한(안전장치)까지 지나면 끝낸다."""
+    config = {**CONFIG, "timing": {**CONFIG["timing"], "wait_hand_timeout_ms": 1000}}
+    sm = build(["OPEN_PALM", "FIST", "MOVE_RIGHT"], config)
+    status = None
+    t = 0.0
+    while status is None or not status.finished:
+        status = sm.update(Observation(t, hand_found=False))
+        t += FRAME_MS
+        assert t < 5000, "대기 제한이 걸리지 않았다"
     assert status.state == State.FAIL
     assert status.fail_reason is FailReason.HAND_NOT_FOUND
+    assert t >= 1000.0
+
+
+def test_hand_must_be_held_before_the_first_step_starts():
+    """wait_hand_ready_ms 동안 연속으로 잡혀야 1단계가 시작된다."""
+    config = {**CONFIG, "timing": {**CONFIG["timing"], "wait_hand_ready_ms": 400}}
+    sm = build(["OPEN_PALM", "FIST", "MOVE_RIGHT"], config)
+
+    sm.update(obs(0.0, shape_hand("OPEN_PALM")))
+    assert sm.state is State.WAIT_HAND
+
+    t = 0.0
+    while sm.state is not State.ACTION:
+        t += FRAME_MS
+        sm.update(obs(t, shape_hand("OPEN_PALM")))
+        assert t < 2000
+    assert t >= 400.0
 
 
 def test_hand_disappearing_mid_action_gives_hand_lost():

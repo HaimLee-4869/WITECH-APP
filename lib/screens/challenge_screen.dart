@@ -172,12 +172,20 @@ class _CaptureArea extends ConsumerWidget {
       borderColor: switch (flow.phase) {
         ChallengePhase.failed || ChallengePhase.unavailable => AppColors.danger,
         ChallengePhase.passed => AppColors.success,
-        ChallengePhase.running => AppColors.ring,
+        // 손을 찾는 중에는 아직 준비가 안 됐다는 뜻으로 회색 (인증 화면과 같다)
+        ChallengePhase.running => (flow.status?.awaitingHand ?? true)
+            ? AppColors.textSecondary
+            : AppColors.ring,
         ChallengePhase.idle => AppColors.textSecondary,
       },
-      // 손 모양 유지 진행도를 테두리 아크로 보여준다. 얼마나 더 있어야 하는지
-      // 모르면 사용자가 손을 먼저 내린다.
-      progress: flow.status?.holdProgress,
+      // 대기 중에는 손이 얼마나 연속으로 잡혔는지, 판정 중에는 손 모양 유지
+      // 진행도를 테두리 아크로 보여준다. 얼마나 더 있어야 하는지 모르면
+      // 사용자가 손을 먼저 내린다.
+      progress: flow.status == null
+          ? null
+          : (flow.status!.awaitingHand
+              ? flow.status!.handReadyProgress
+              : flow.status!.holdProgress),
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
@@ -227,7 +235,8 @@ class _TimeBar extends ConsumerWidget {
     final double total = config.timing.perActionTimeoutMs;
     final double ratio =
         total <= 0 ? 0.0 : (status.remainingMs / total).clamp(0.0, 1.0);
-    final bool paused = status.awaitingEscape;
+    // 손을 기다리는 중과 이탈 관문 대기 중에는 제한 시간이 흐르지 않는다.
+    final bool paused = status.awaitingEscape || status.awaitingHand;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(3),
@@ -264,9 +273,10 @@ class _Prompt extends ConsumerWidget {
       ChallengePhase.idle => ('준비 중입니다…', AppColors.textSecondary),
       ChallengePhase.running => (
           flow.status == null
-              ? '원 안에 손을 들어주세요'
+              ? '손을 원 안에 위치시켜 주세요'
               : challengePrompt(flow.status!),
-          flow.status?.awaitingEscape ?? false
+          (flow.status?.awaitingEscape ?? false) ||
+                  (flow.status?.awaitingHand ?? true)
               ? AppColors.textSecondary
               : AppColors.textPrimary,
         ),
@@ -310,8 +320,11 @@ class _DebugLine extends ConsumerWidget {
     }
 
     // 손 모양 단계는 한 줄이면 충분하다.
-    final StringBuffer buffer = StringBuffer()
-      ..write('검출: ${challengeShapeLabel(flow.debugShape)}');
+    final StringBuffer buffer = StringBuffer();
+    if (status.awaitingHand) {
+      buffer.write('대기 ${(status.handReadyProgress * 100).round()}% / ');
+    }
+    buffer.write('검출: ${challengeShapeLabel(flow.debugShape)}');
     if (status.shapeConfidence > 0) {
       buffer.write(' (${status.shapeConfidence.toStringAsFixed(2)})');
     }

@@ -30,7 +30,9 @@ def test_config_includes_challenge(client):
     assert body["movement"]["minDisplacementRatio"] == 0.226
     assert body["movement"]["axisDominanceRatio"] == 3.634
     assert body["timing"] == {
-        "perActionTimeoutMs": 2000, "totalTimeoutMs": 6000, "maxRetries": 1
+        "perActionTimeoutMs": 2000, "totalTimeoutMs": 6000, "maxRetries": 1,
+        # 손을 들기 전에는 제한 시간이 흐르지 않는다 (앱 대기 단계)
+        "waitHandReadyMs": 400, "waitHandTimeoutMs": 15000,
     }
     assert body["steps"] == {"numShapes": 2, "numMoves": 1}
 
