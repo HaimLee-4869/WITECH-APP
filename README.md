@@ -1,19 +1,37 @@
-# Sign-ID — 수어 제스처 기반 비접촉 인증 (Android 앱 프론트엔드)
+# Sign-ID — 수어 제스처 기반 비접촉 인증
 
-카드키·지문 대신 **수어 제스처**로 출입을 인증하는 안드로이드 앱.
+카드키·지문 대신 **수어 제스처**로 출입을 인증하는 시스템.
 사용자가 카메라 앞에서 자신만의 손동작("수어 암호")을 수행하면, 앱이 MediaPipe로
-손 랜드마크 21점을 수집해 서버로 보내고 서버가 본인 여부를 판정한다.
+손 랜드마크 21점을 수집해 서버로 보내고, 서버가 AI 모델로 본인 여부를 판정한다.
 
-이 저장소의 범위는 **UI + 랜드마크 추출 + 목(mock) API 연동**까지다.
-실제 AI 인증 모델과 백엔드 서버는 별도 팀에서 개발 중이다.
+**앱·백엔드·안티스푸핑이 한 저장소에 있고 전부 실제로 동작한다.**
+처음에는 앱만 있는 저장소였고 백엔드와 AI 모델은 목(mock)이었다. 지금은
+실서버 연동이 기본값이다(`kUseMockApi = false`).
 
-| 포함 | 제외 |
+| 구성 요소 | 위치 | 상태 |
+|---|---|---|
+| **Flutter 앱** | `lib/` | 화면 UI, 카메라 프리뷰 + 손 뼈대 오버레이, 랜드마크 수집 |
+| **안티스푸핑 Challenge** | `lib/challenge/` (판정)<br>`challenge_response/` (원본·임계값 도출) | 무작위 동작 3개를 요청하고 규칙 기반 판정. 인증 앞단 |
+| **FastAPI 백엔드** | `backend/` | SQLite + Alembic, 등록·인증·이력·운영 API |
+| **AI 인증 모델** | `backend/ai/` | AI팀 릴리스 `shared-dual-head-v1.1.1`. 백엔드가 import해서 쓴다 |
+
+| 아직 없는 것 | 비고 |
 |---|---|
-| 전체 화면 UI (홈/인증/결과/등록/관리자) | 실제 AI 인증 모델 |
-| 카메라 프리뷰 + 실시간 손 뼈대 오버레이 | 실제 백엔드 서버 |
-| MediaPipe 랜드마크 추출 및 프레임 수집 | 사용자 계정/비밀번호 인증 |
-| 목 API 레이어 (서버 응답 시뮬레이션) | 실제 DB |
-| 상태 관리, 화면 전환, 에러 처리 | 푸시 알림 |
+| 사용자 계정/비밀번호 인증 | 홈에서 사용자를 고르는 것이 신원이다 |
+| `/admin/*` 접근 제어 | 인증이 없다. 외부 노출 금지 |
+| 푸시 알림 | |
+| 개인 제스처(자유 제스처) | 모델은 임베딩 방식이나 체크포인트는 G1~G5로 학습됐다 |
+| Challenge 결과의 서버 검증 | 판정이 앱에서 끝난다. 앱을 조작하면 우회된다 |
+
+### 문서
+
+| 문서 | 내용 |
+|---|---|
+| 이 파일 | 앱 실행·플래그·구조, 안티스푸핑 Challenge, 알려진 제약 |
+| [`PROGRESS.md`](PROGRESS.md) | **전체 진행 현황과 성능 수치.** 먼저 읽을 것 |
+| [`backend/README.md`](backend/README.md) | API 규격, 사유 코드, 운영점 전환, ai_release 교체 절차 |
+| [`challenge_response/README.md`](challenge_response/README.md) | 안티스푸핑 임계값 도출 근거 |
+| `SPEC.md`, `BACKEND_SPEC.md`, `CHALLENGE_SPEC.md` | 초기 구현 명세 (현재 상태와 다를 수 있다) |
 
 ---
 
@@ -32,6 +50,29 @@
 `ios/`, `web/`, `windows/` 등의 폴더는 만들지 않는다. `hand_landmarker`
 플러그인이 JNI 기반 Android 전용이라 다른 플랫폼에서는 빌드되지 않는다.
 
+### 백엔드 먼저 띄우기
+
+앱이 실서버에 붙는 것이 기본값이라(`kUseMockApi = false`) 백엔드가 떠 있어야 한다.
+자세한 것은 [`backend/README.md`](backend/README.md) 1장.
+
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/activate            # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+
+# 실기기에서 붙으려면 0.0.0.0으로 띄운다 (localhost는 폰 자신을 가리킨다)
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+python scripts/seed_demo_data.py  # 팀원 5명 (다른 터미널에서)
+```
+
+startup에서 마이그레이션, AI 가중치 로드(약 1초), 기본 데이터 삽입이 자동으로 된다.
+`http://127.0.0.1:8000/docs`에서 API를 눌러 볼 수 있다.
+
+서버 없이 화면만 보려면 `lib/core/config.dart`의 `kUseMockApi`를 `true`로 바꾼다.
+
 ### 내 폰에 설치하기
 
 1. 폰에서 **개발자 옵션 → USB 디버깅**을 켜고 USB로 연결한다.
@@ -45,9 +86,12 @@ flutter devices          # 폰이 목록에 보여야 한다
 
 ```bash
 flutter pub get
-flutter build apk --release
+flutter build apk --release --dart-define=SIGNID_API_BASE=http://192.168.0.10:8000
 flutter install --release
 ```
+
+`SIGNID_API_BASE`는 **PC의 LAN IP**다. `ipconfig`(Windows) / `ifconfig`(macOS)로 확인한다.
+빼먹으면 앱이 서버를 찾지 못하고 홈 화면 하단에 오류가 뜬다.
 
 기기가 여러 대면 `-d <device-id>`로 지정한다 (`flutter devices`의 두 번째 열).
 
@@ -74,8 +118,18 @@ flutter analyze   # 경고 0개여야 한다
 flutter test      # 340개 (상태 머신·오버레이·화면 전환 + 안티스푸핑 Challenge 237개)
 ```
 
-테스트는 `kUseFakeLandmarks` 값과 무관하게 항상 `FakeLandmarkSource`를 주입한다
+테스트는 `kUseFakeLandmarks` 값과 무관하게 항상 가짜 소스를 주입한다
 (`test/test_helpers.dart`). 플래그를 바꿨다고 테스트가 깨지지 않는다.
+
+백엔드와 안티스푸핑 원본도 각자 테스트가 있다:
+
+```bash
+cd backend && pytest                                  # 193개
+cd challenge_response && pytest                       # 236개 (test_guide_overlay는 opencv 필요)
+```
+
+`challenge_response`의 `tests/test_dart_golden.py`는 **파이썬 규칙과 Dart 이식본이
+갈라졌는지** 본다. 규칙을 고쳤으면 `python scripts/export_dart_golden.py`를 먼저 돌린다.
 
 ### 에뮬레이터에서 확인하기
 
@@ -83,6 +137,10 @@ flutter test      # 340개 (상태 머신·오버레이·화면 전환 + 안티�
 `kUseFakeLandmarks = true`로 바꾸면 가짜 랜드마크가 흐르면서 인증 흐름 전체가
 끝까지 동작한다. 카메라 없이도 상태 머신, 오버레이 렌더링, 카운트다운,
 진행률 아크, 결과 화면을 전부 확인할 수 있다.
+
+다만 **안티스푸핑 Challenge는 통과할 수 없다.** 가짜 손은 사인파라 요청하는 손
+모양(FIST/INDEX…)을 만들지 못한다. Challenge 흐름 자체는
+`test/challenge/flow_test.dart`가 대본 손으로 끝까지 돌려 확인한다.
 
 ---
 
@@ -169,13 +227,21 @@ MediaPipe가 뱉는 raw 좌표를 그대로 수집해 서버로 보낸다. AI팀
 - `OnDeviceLandmarkSource` — 카메라 + MediaPipe (실기기)
 - `FakeLandmarkSource` — 사인파 기반 가짜 좌표 (에뮬레이터/테스트)
 
-### C. 목 API는 스위치 하나로 교체
+### C. 서버 연동은 스위치 하나로 되돌릴 수 있다
 
-`ApiClient` 인터페이스를 `MockApiClient`와 `HttpApiClient`가 함께 구현한다.
-`kUseMockApi` 하나만 바꾸면 전환된다.
+`ApiClient` 인터페이스를 `HttpApiClient`(기본)와 `MockApiClient`가 함께 구현한다.
+`kUseMockApi` 하나만 바꾸면 전환된다. 서버 없이 화면만 보거나 목업을 시연할 때 쓴다.
 
-**판정 임계값(threshold)은 서버가 소유한다.** 앱에 상수로 박지 않고 응답에 실려
-온 값을 그대로 표시만 한다. 운영 중 조정이 가능해야 하기 때문이다.
+**판정에 쓰는 값은 전부 서버가 소유한다.** 앱에 상수로 박지 않는다.
+
+| 값 | 어디서 오나 |
+|---|---|
+| 인증 임계값 Tu·Tg | `/verify` 응답에 실려 온다. 앱은 표시만 한다 |
+| 등록 회차 수, 촬영 길이 | `GET /config` |
+| 안티스푸핑 Challenge 임계값 전부 | `GET /config`의 `challenge` 블록. **못 받으면 시작하지 않는다** |
+
+운영 중 조정이 가능해야 하기 때문이다. 촬영 길이나 Challenge 임계값을 바꿀 때
+앱을 다시 배포하지 않는다.
 
 ### D. 타임스탬프는 실측값
 
