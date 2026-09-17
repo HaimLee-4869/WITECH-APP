@@ -26,7 +26,7 @@ import 'package:signid/state/capture_session.dart';
 /// `hand_landmarker`의 검출 스트림은 네이티브 이벤트 채널이라, 구독을 정리하지
 /// 않고 다시 `start()`하면 **같은 결과가 구독 수만큼 흘러나온다.**
 /// [subscriptions]가 그 개수다.
-class _RelistenSource implements LandmarkSource {
+class RelistenSource implements LandmarkSource {
   final Duration interval;
   final _controller = StreamController<HandFrame>.broadcast();
   final _clock = Stopwatch();
@@ -38,7 +38,7 @@ class _RelistenSource implements LandmarkSource {
   /// [stop]이 구독을 정리하는지. false면 실기기에서 겪은 버그 그대로다.
   final bool stopReleasesSubscription;
 
-  _RelistenSource(this.interval, {this.stopReleasesSubscription = true});
+  RelistenSource(this.interval, {this.stopReleasesSubscription = true});
 
   @override
   Stream<HandFrame> get frames => _controller.stream;
@@ -102,7 +102,7 @@ class _RelistenSource implements LandmarkSource {
 
 /// 한 번의 캡처를 끝까지 돌리고 모인 프레임을 돌려준다.
 Future<List<HandFrame>> capture(
-  _RelistenSource source, {
+  RelistenSource source, {
   required Duration record,
 }) async {
   final Completer<List<HandFrame>> done = Completer<List<HandFrame>>();
@@ -130,7 +130,7 @@ void main() {
   const Duration record = Duration(seconds: 4);
 
   test('구독이 하나면 4초에 프레임이 한 벌만 모인다', () async {
-    final _RelistenSource source = _RelistenSource(frame);
+    final RelistenSource source = RelistenSource(frame);
     addTearDown(source.dispose);
 
     final List<HandFrame> frames = await capture(source, record: record);
@@ -143,8 +143,8 @@ void main() {
   test('구독이 정리되지 않아도 같은 프레임이 두 번 들어가지 않는다', () async {
     // 실기기 회귀의 재현: Challenge가 stop()했지만 구독이 남고, 인증이 start()해서
     // 구독이 둘이 된다. 고치기 전에는 여기서 119~120장이 모였다.
-    final _RelistenSource source =
-        _RelistenSource(frame, stopReleasesSubscription: false);
+    final RelistenSource source =
+        RelistenSource(frame, stopReleasesSubscription: false);
     addTearDown(source.dispose);
 
     await source.start(); // Challenge가 켠다
@@ -162,8 +162,8 @@ void main() {
   test('수집된 tMs는 항상 증가한다', () async {
     // 서버는 tMs가 증가하지 않으면 422 non_monotonic_timestamps로 거절한다.
     // 등록 2회차에서 실제로 났다.
-    final _RelistenSource source =
-        _RelistenSource(frame, stopReleasesSubscription: false);
+    final RelistenSource source =
+        RelistenSource(frame, stopReleasesSubscription: false);
     addTearDown(source.dispose);
     await source.start();
     await source.stop();
@@ -182,12 +182,12 @@ void main() {
 
   test('Challenge를 거쳐도 프레임 수가 같다', () async {
     // 사용자가 요청한 재현 조건 그대로.
-    final _RelistenSource direct = _RelistenSource(frame);
+    final RelistenSource direct = RelistenSource(frame);
     addTearDown(direct.dispose);
     final int withoutChallenge = (await capture(direct, record: record)).length;
 
-    final _RelistenSource viaChallenge =
-        _RelistenSource(frame, stopReleasesSubscription: false);
+    final RelistenSource viaChallenge =
+        RelistenSource(frame, stopReleasesSubscription: false);
     addTearDown(viaChallenge.dispose);
     await viaChallenge.start();
     await viaChallenge.stop();

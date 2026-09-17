@@ -106,6 +106,10 @@ class _RingPainter extends CustomPainter {
     }
 
     // 진행률 아크: 남은 구간은 흐리게, 지나간 구간은 진하게. 12시 방향에서 시작.
+    //
+    // 아크만 [AppColors.progress](보라)를 쓴다. 상태 색을 그대로 쓰면 차오르는
+    // 아크가 "정답/통과"로 읽히는데, 이건 촬영이 얼마나 진행됐는지일 뿐이다.
+    // 바탕 원은 상태 색을 흐리게 남겨 테두리 상태를 계속 보여준다.
     final rect = Rect.fromCircle(center: center, radius: radius);
     canvas.drawCircle(
       center,
@@ -121,7 +125,7 @@ class _RingPainter extends CustomPainter {
       2 * math.pi * p.clamp(0.0, 1.0),
       false,
       Paint()
-        ..color = color
+        ..color = AppColors.progress
         ..strokeWidth = _strokeWidth
         ..strokeCap = StrokeCap.round
         ..style = PaintingStyle.stroke,
@@ -132,3 +136,10 @@ class _RingPainter extends CustomPainter {
   bool shouldRepaint(covariant _RingPainter old) =>
       old.color != color || old.progress != progress;
 }
+
+/// 테스트가 페인터만 따로 그려볼 수 있게 열어 둔다.
+///
+/// 색 규칙(진행률 아크 = 보라, 테두리 = 상태 색)이 위젯 트리를 띄우지 않고도
+/// 검증돼야 한다. 색이 섞이면 사용자가 진행률을 판정 결과로 읽는다.
+CustomPainter ringPainterForTest({required Color color, double? progress}) =>
+    _RingPainter(color: color, progress: progress);

@@ -15,7 +15,7 @@ void main() {
           'captureDurationMs': 4000,
           'handRequired': 'right',
           'modelVersion': 'shared-dual-head-v1.1.0',
-          if (url != null) 'postAuthUrl': url,
+          'postAuthUrl': ?url,
         },
       );
 

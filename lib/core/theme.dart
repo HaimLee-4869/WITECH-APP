@@ -13,6 +13,12 @@ class AppColors {
   static const ring = Color(0xFF3DDC97); // 손 가이드 원 (민트)
   static const landmark = Color(0xFF22D3EE); // 랜드마크 점 (시안)
   static const connection = Color(0xFF0E7490); // 뼈대 선 (어두운 청록)
+  /// 촬영 진행률 아크 전용.
+  ///
+  /// 상태 색(회색=탐색, 민트=준비, 초록=성공, 빨강=실패)과 겹치면 안 된다.
+  /// 초록으로 두면 차오르는 아크가 "정답/통과"로 읽히는데, 실제로는 그냥
+  /// 촬영이 얼마나 진행됐는지일 뿐이다.
+  static const progress = Color(0xFF9B6BF2); // 보라
   static const success = Color(0xFF34D399);
   static const danger = Color(0xFFEF4444);
   static const textPrimary = Color(0xFFFFFFFF);
