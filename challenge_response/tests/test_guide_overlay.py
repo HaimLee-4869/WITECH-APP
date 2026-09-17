@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
+# 그리기 모듈이라 OpenCV가 있어야 한다. 백엔드 전용 환경에는 없다.
+pytest.importorskip("cv2", reason="guide_overlay는 OpenCV가 필요하다")
+
 import guide_overlay as G  # noqa: E402
 import hand_sketch  # noqa: E402
 

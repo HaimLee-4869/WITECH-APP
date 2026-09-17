@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -176,10 +177,14 @@ def test_import_script_dry_run_reports_no_change(tmp_path):
 
     운영 DB를 보면 결과가 그 DB에 저장된 값에 좌우된다. 빈 DB로 돌린다.
     """
+    # Windows에서 파이프로 받으면 자식이 콘솔 인코딩(cp949)으로 쓴다.
+    # utf-8로 읽으려면 자식에게도 그렇게 쓰라고 해야 한다.
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     out = subprocess.run(
         [sys.executable, "scripts/import_challenge_config.py", "--dry-run",
          "--database-url", f"sqlite:///{tmp_path / 't.db'}"],
         cwd=BACKEND_DIR, capture_output=True, text=True, encoding="utf-8",
+        env=env,
     )
     assert out.returncode == 0, out.stdout + out.stderr
     assert "바뀐 값 없음" in out.stdout
