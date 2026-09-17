@@ -15,6 +15,9 @@ final Map<String, dynamic> _defaults = jsonDecode(
   File('backend/app/default_challenge_config.json').readAsStringSync(),
 ) as Map<String, dynamic>;
 
+/// 서버 기본 설정 원본 그대로. 키를 빼는 테스트에서 쓴다.
+Map<String, dynamic> rawDefaults() => Map<String, dynamic>.of(_defaults);
+
 /// [overrides]를 깊은 병합한 설정.
 ///
 /// 예: `configWith(<String, dynamic>{'escapeFrames': 0})`

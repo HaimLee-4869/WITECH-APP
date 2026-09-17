@@ -199,6 +199,42 @@ class TrackingConfig {
   }
 }
 
+/// 연속 세션에서 손이 바뀌었는지 보는 검사.
+///
+/// ⚠️ **기본은 꺼져 있다.** 정상 세션의 프레임 간 변화량을 재지 않았다.
+/// 자세한 것은 `continuity_monitor.dart`.
+class ContinuityConfig {
+  final bool enabled;
+
+  /// 프레임 간 손 크기 변화 허용치(배수). null이면 미도출.
+  final double? maxScaleJumpRatio;
+
+  /// 프레임 간 손목 이동 허용치(손 크기 배수). null이면 미도출.
+  final double? maxWristJumpRatio;
+
+  const ContinuityConfig({
+    required this.enabled,
+    required this.maxScaleJumpRatio,
+    required this.maxWristJumpRatio,
+  });
+
+  factory ContinuityConfig.fromJson(Map<String, dynamic> json) =>
+      ContinuityConfig(
+        // 임계값이 없으면 켤 수 없다. 서버도 막지만 앱도 한 번 더 본다.
+        enabled: (json['enabled'] as bool? ?? false) &&
+            json['maxScaleJumpRatio'] != null &&
+            json['maxWristJumpRatio'] != null,
+        maxScaleJumpRatio: (json['maxScaleJumpRatio'] as num?)?.toDouble(),
+        maxWristJumpRatio: (json['maxWristJumpRatio'] as num?)?.toDouble(),
+      );
+
+  static const ContinuityConfig off = ContinuityConfig(
+    enabled: false,
+    maxScaleJumpRatio: null,
+    maxWristJumpRatio: null,
+  );
+}
+
 /// 단계 구성. 기본은 손 모양 2 + 이동 1의 3단계다.
 class StepsConfig {
   final int numShapes;
@@ -250,6 +286,7 @@ class ChallengeConfig {
   final TimingConfig timing;
   final TrackingConfig tracking;
   final StepsConfig steps;
+  final ContinuityConfig continuity;
   final List<String> shapePool;
   final List<String> movePool;
 
@@ -268,6 +305,7 @@ class ChallengeConfig {
     required this.timing,
     required this.tracking,
     required this.steps,
+    required this.continuity,
     required this.shapePool,
     required this.movePool,
   });
@@ -292,6 +330,11 @@ class ChallengeConfig {
         tracking:
             TrackingConfig.fromJson(json['tracking'] as Map<String, dynamic>),
         steps: StepsConfig.fromJson(json['steps'] as Map<String, dynamic>),
+        continuity: switch (json['continuity']) {
+          final Map<String, dynamic> c => ContinuityConfig.fromJson(c),
+          // 설정에 없으면 검사 없음. 옛 서버에 붙어도 동작한다.
+          _ => ContinuityConfig.off,
+        },
         shapePool: (json['shapePool'] as List<dynamic>).cast<String>(),
         movePool: (json['movePool'] as List<dynamic>).cast<String>(),
       );

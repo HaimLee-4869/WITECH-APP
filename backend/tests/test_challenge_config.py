@@ -262,3 +262,48 @@ def test_step_result_hold_is_adjustable(client):
     assert timing["stepResultHoldMs"] == 2500
     assert timing["stepPrepareMs"] == 1500      # 나머지는 그대로
     assert timing["perActionTimeoutMs"] == 2000
+
+
+# --- 연속성 검사 (근거 없이 켤 수 없다) --------------------------------------------
+
+def test_continuity_is_off_by_default(client):
+    """정상 세션의 프레임 간 변화량을 재지 않았다. 추측한 값으로 켜지 않는다."""
+    c = client.get("/config").json()["challenge"]["continuity"]
+    assert c == {
+        "enabled": False,
+        "maxScaleJumpRatio": None,
+        "maxWristJumpRatio": None,
+    }
+
+
+def test_continuity_cannot_be_enabled_without_thresholds(client):
+    """켜기만 하고 임계값이 없으면 아무것도 막지 못하면서 켜진 것처럼 보인다."""
+    for patch in (
+        {"enabled": True},
+        {"enabled": True, "maxScaleJumpRatio": 1.5},
+        {"enabled": True, "maxWristJumpRatio": 0.5},
+    ):
+        res = client.patch("/admin/config", json={"challenge": {"continuity": patch}})
+        assert res.status_code == 422, patch
+        assert res.json()["detail"]["reason"] == "invalid_challenge_config"
+
+    assert client.get("/config").json()["challenge"]["continuity"]["enabled"] is False
+
+
+def test_continuity_can_be_enabled_with_both_thresholds(client):
+    """분포에서 도출한 뒤에는 앱 재배포 없이 켠다."""
+    res = client.patch("/admin/config", json={"challenge": {"continuity": {
+        "enabled": True, "maxScaleJumpRatio": 1.6, "maxWristJumpRatio": 0.55,
+    }}})
+    assert res.status_code == 200
+    c = res.json()["challenge"]["continuity"]
+    assert c["enabled"] is True
+    assert c["maxScaleJumpRatio"] == 1.6
+    assert c["maxWristJumpRatio"] == 0.55
+
+
+def test_continuity_unresolved_note_exists():
+    """왜 꺼져 있는지 설정 파일에 근거가 남아 있어야 한다."""
+    bundled = cfg.default_challenge_config()
+    assert "_unresolved_continuity" in bundled
+    assert "추측" in bundled["_unresolved_continuity"]
