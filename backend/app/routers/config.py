@@ -23,6 +23,7 @@ def get_config(session: Session = Depends(get_db)) -> ConfigOut:
         capture_duration_ms=int(cfg.get_value(session, cfg.CAPTURE_DURATION_MS)),
         hand_required=str(cfg.get_value(session, cfg.HAND_REQUIRED)),
         model_version=cfg.get_active_model_version(session) or encoder.MODEL_VERSION,
+        post_auth_url=str(cfg.get_value(session, cfg.POST_AUTH_URL)),
         # Challenge 판정은 앱이 하지만 임계값은 여기서 내려준다. 앱에 상수가 없다.
         challenge=ChallengeConfigOut.model_validate(cfg.get_challenge_config(session)),
     )

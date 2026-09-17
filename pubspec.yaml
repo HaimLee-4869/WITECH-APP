@@ -21,6 +21,7 @@ dependencies:
   intl: ^0.20.3                # 날짜/시간 포맷
   permission_handler: ^13.0.1  # 카메라 권한
   http: ^1.6.0                 # 목 단계에선 미사용. http_api_client 스텁 대비.
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

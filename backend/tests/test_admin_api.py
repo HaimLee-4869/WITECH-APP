@@ -29,6 +29,7 @@ def test_config_defaults(client):
         "captureDurationMs": 4000,
         "handRequired": "right",
         "modelVersion": encoder.MODEL_VERSION,
+        "postAuthUrl": "https://www.naver.com",
     }
     assert challenge["steps"] == {"numShapes": 2, "numMoves": 1}
 
@@ -180,3 +181,25 @@ def test_health_degraded_on_version_mismatch(client, db):
     assert data["modelVersion"] == "old-v0"
     assert data["activeThreshold"] is None  # old-v0용 threshold 없음
     assert data["activeGestureThreshold"] is None
+
+
+# --- postAuthUrl (인증 성공 후 이동할 주소) ----------------------------------------
+
+def test_post_auth_url_is_served(client):
+    """앱이 하드코딩하지 않는다. 주소를 바꿀 때 앱을 다시 배포하지 않으려고."""
+    assert client.get("/config").json()["postAuthUrl"] == "https://www.naver.com"
+
+
+def test_post_auth_url_can_be_changed(client):
+    res = client.patch("/admin/config", json={"postAuthUrl": "https://example.com/portal"})
+    assert res.status_code == 200
+    assert res.json()["postAuthUrl"] == "https://example.com/portal"
+    assert client.get("/config").json()["postAuthUrl"] == "https://example.com/portal"
+
+
+def test_post_auth_url_requires_https(client):
+    """앱이 외부 브라우저로 여는 주소다. http나 다른 스킴을 받지 않는다."""
+    for bad in ("http://example.com", "javascript:alert(1)", "example.com", ""):
+        res = client.patch("/admin/config", json={"postAuthUrl": bad})
+        assert res.status_code == 422, bad
+    assert client.get("/config").json()["postAuthUrl"] == "https://www.naver.com"

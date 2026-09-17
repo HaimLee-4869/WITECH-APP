@@ -273,6 +273,8 @@ class ConfigOut(ResponseModel):
     capture_duration_ms: int
     hand_required: str
     model_version: str
+    # 인증 성공 후 "계속하기"로 여는 주소. 2차 인증 시연용.
+    post_auth_url: str
     challenge: ChallengeConfigOut
 
 
@@ -281,6 +283,8 @@ class ConfigPatch(CamelModel):
     enrollment_gestures: int | None = Field(default=None, ge=1, le=5)
     capture_duration_ms: int | None = Field(default=None, ge=750, le=10000)
     hand_required: str | None = Field(default=None, pattern=r"^(right|left|any)$")
+    # https만 받는다. 앱이 외부 브라우저로 열기 때문이다.
+    post_auth_url: str | None = Field(default=None, pattern=r"^https://\S+$", max_length=500)
     # 일부 키만 보내면 저장된 값에 깊은 병합 후 ChallengeConfigOut으로 검증한다.
     # 예: {"challenge": {"timing": {"perActionTimeoutMs": 2500}}}
     challenge: dict | None = None

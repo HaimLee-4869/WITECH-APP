@@ -152,6 +152,7 @@ def patch_config(body: ConfigPatch, session: Session = Depends(get_db)) -> Confi
         ("enrollment_gestures", cfg.ENROLLMENT_GESTURES),
         ("capture_duration_ms", cfg.CAPTURE_DURATION_MS),
         ("hand_required", cfg.HAND_REQUIRED),
+        ("post_auth_url", cfg.POST_AUTH_URL),
     ):
         value = getattr(body, field)
         if value is None:

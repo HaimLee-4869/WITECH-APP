@@ -20,6 +20,12 @@ class ServerConfig {
   /// 서버가 쓰는 인증 모델 버전. 화면 표시·디버깅용.
   final String modelVersion;
 
+  /// 인증 성공 후 "계속하기"로 여는 주소.
+  ///
+  /// 이 인증이 **2차 인증**으로 쓰인다는 것을 보여주는 용도다. 앱에 박아두면
+  /// 주소를 바꿀 때 다시 배포해야 하므로 서버가 소유한다. https만 받는다.
+  final String postAuthUrl;
+
   /// 안티스푸핑 Challenge 판정값.
   ///
   /// **null이면 Challenge를 시작할 수 없다.** 임계값을 앱에 박아두지 않기로 했으므로
@@ -32,6 +38,7 @@ class ServerConfig {
     required this.captureDurationMs,
     required this.handRequired,
     required this.modelVersion,
+    required this.postAuthUrl,
     this.challenge,
   });
 
@@ -45,6 +52,7 @@ class ServerConfig {
     captureDurationMs: kRecordDurationMs,
     handRequired: 'right',
     modelVersion: 'unknown',
+    postAuthUrl: '',
   );
 
   factory ServerConfig.fromJson(Map<String, dynamic> json) => ServerConfig(
@@ -56,6 +64,7 @@ class ServerConfig {
         fallback.captureDurationMs,
     handRequired: json['handRequired'] as String? ?? fallback.handRequired,
     modelVersion: json['modelVersion'] as String? ?? fallback.modelVersion,
+    postAuthUrl: json['postAuthUrl'] as String? ?? fallback.postAuthUrl,
     // 형태가 예상과 다르면 null로 두고 Challenge를 막는다. 임계값을 추측해서
     // 채우면 도출과 다른 기준으로 판정하게 된다.
     challenge: switch (json['challenge']) {
@@ -79,8 +88,14 @@ class ServerConfig {
     captureDurationMs: captureDurationMs,
     handRequired: handRequired,
     modelVersion: modelVersion,
+    postAuthUrl: postAuthUrl,
     challenge: challenge,
   );
+
+  /// "계속하기"를 보여줄 수 있는지. 서버가 주소를 안 줬으면 버튼을 숨긴다.
+  ///
+  /// https만 연다. 다른 스킴은 외부 브라우저에서 무엇이 열릴지 알 수 없다.
+  bool get hasPostAuthUrl => postAuthUrl.startsWith('https://');
 
   /// 오른손만 허용하는지. 화면 안내 문구를 띄울지 결정한다.
   bool get requiresRightHand => handRequired == 'right';

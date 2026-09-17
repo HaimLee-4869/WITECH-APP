@@ -1,8 +1,12 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/theme.dart';
+import '../models/server_config.dart';
+import '../state/providers.dart';
 import '../models/api_error.dart';
 import '../models/verify.dart';
 import '../widgets/primary_button.dart';
@@ -13,16 +17,16 @@ import '../widgets/status_chip.dart';
 ///
 /// 성공하면 2.5초 뒤 자동으로 홈까지 되돌아간다. 실패했을 때는 자동 이동하지
 /// 않는다. 왜 실패했는지 읽을 시간을 줘야 하기 때문이다.
-class ResultScreen extends StatefulWidget {
+class ResultScreen extends ConsumerStatefulWidget {
   final VerifyResponse response;
 
   const ResultScreen({super.key, required this.response});
 
   @override
-  State<ResultScreen> createState() => _ResultScreenState();
+  ConsumerState<ResultScreen> createState() => _ResultScreenState();
 }
 
-class _ResultScreenState extends State<ResultScreen> {
+class _ResultScreenState extends ConsumerState<ResultScreen> {
   static const Duration _autoCloseDelay = Duration(milliseconds: 2500);
 
   Timer? _autoClose;
@@ -31,7 +35,11 @@ class _ResultScreenState extends State<ResultScreen> {
   void initState() {
     super.initState();
     if (widget.response.passed) {
-      _autoClose = Timer(_autoCloseDelay, _goHome);
+      // '계속하기'가 있으면 자동으로 닫지 않는다. 사용자가 누를 시간을 줘야 한다.
+      final ServerConfig config = ref.read(serverConfigProvider).config;
+      if (!config.hasPostAuthUrl) {
+        _autoClose = Timer(_autoCloseDelay, _goHome);
+      }
     }
   }
 
@@ -47,6 +55,26 @@ class _ResultScreenState extends State<ResultScreen> {
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
+  /// 인증 뒤 이어지는 서비스를 외부 브라우저로 연다.
+  ///
+  /// 이 인증이 **2차 인증**으로 쓰인다는 것을 보여주는 용도다. 주소는 서버가 준다
+  /// (`GET /config`의 `postAuthUrl`). 앱 안 웹뷰가 아니라 외부 브라우저로 여는 이유는,
+  /// 2차 인증을 마친 뒤 원래 쓰던 브라우저 세션으로 돌아가는 흐름이기 때문이다.
+  Future<void> _continue() async {
+    _autoClose?.cancel();
+    final ServerConfig config = ref.read(serverConfigProvider).config;
+    if (!config.hasPostAuthUrl) return;
+
+    final Uri url = Uri.parse(config.postAuthUrl);
+    final bool opened =
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${config.postAuthUrl} 을 열지 못했습니다.')),
+      );
+    }
+  }
+
   /// 결과 화면만 닫아 인증 화면으로 돌아간다. 재시도용.
   void _retry() {
     _autoClose?.cancel();
@@ -57,6 +85,8 @@ class _ResultScreenState extends State<ResultScreen> {
   Widget build(BuildContext context) {
     final res = widget.response;
     final passed = res.passed;
+    final bool hasContinue =
+        ref.watch(serverConfigProvider).config.hasPostAuthUrl;
     final color = passed ? AppColors.success : AppColors.danger;
 
     return Scaffold(
@@ -93,13 +123,20 @@ class _ResultScreenState extends State<ResultScreen> {
               Center(child: _ScoreChip(response: res)),
               const Spacer(flex: 4),
               if (passed) ...[
-                PrimaryButton(label: '확인', onPressed: _goHome),
-                const SizedBox(height: 12),
-                const Text(
-                  '잠시 후 자동으로 처음 화면으로 돌아갑니다',
-                  textAlign: TextAlign.center,
-                  style: AppText.caption,
-                ),
+                // 실패 시에는 이 버튼을 보여주지 않는다.
+                if (hasContinue) ...[
+                  PrimaryButton(label: '계속하기', onPressed: _continue),
+                  const SizedBox(height: 12),
+                  SecondaryButton(label: '홈으로', onPressed: _goHome),
+                ] else ...[
+                  PrimaryButton(label: '확인', onPressed: _goHome),
+                  const SizedBox(height: 12),
+                  const Text(
+                    '잠시 후 자동으로 처음 화면으로 돌아갑니다',
+                    textAlign: TextAlign.center,
+                    style: AppText.caption,
+                  ),
+                ],
               ] else ...[
                 PrimaryButton(label: '다시 시도', onPressed: _retry),
                 const SizedBox(height: 12),

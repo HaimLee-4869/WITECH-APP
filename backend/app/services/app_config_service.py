@@ -15,6 +15,8 @@ ENROLLMENT_TAKES = "enrollmentTakes"
 ENROLLMENT_GESTURES = "enrollmentGestures"
 CAPTURE_DURATION_MS = "captureDurationMs"
 HAND_REQUIRED = "handRequired"
+# 인증 성공 후 "계속하기"로 여는 주소. 이 인증이 2차 인증으로 쓰임을 보여준다.
+POST_AUTH_URL = "postAuthUrl"
 # 안티스푸핑 Challenge 판정값 묶음. 앱이 이 값으로 판정하므로 앱에 상수가 없다.
 CHALLENGE = "challenge"
 # templates/embeddings 조회에 쓰는 활성 인증 모델 버전. 재색인이 끝나야 바뀐다.
@@ -41,6 +43,8 @@ DEFAULTS: dict[str, Any] = {
     #    scripts/clear_enrollments.py로 정리하고 전원 재등록해야 한다.
     CAPTURE_DURATION_MS: 4000,
     HAND_REQUIRED: "right",
+    # 앱 재배포 없이 바꾸려고 서버가 소유한다.
+    POST_AUTH_URL: "https://www.naver.com",
 }
 
 

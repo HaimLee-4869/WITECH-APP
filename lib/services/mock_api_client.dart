@@ -44,6 +44,7 @@ class MockApiClient implements ApiClient {
       captureDurationMs: kRecordDurationMs,
       handRequired: 'right',
       modelVersion: 'mock-v0',
+      postAuthUrl: 'https://www.naver.com',
     );
   }
 
