@@ -12,6 +12,52 @@
 
 ---
 
+## 0. 이 판정 로직은 앱으로 이식됐다 (2026-09-18)
+
+여기는 **원본이자 임계값 도출 도구**다. 실제 인증에 쓰이는 판정은 Flutter 앱의
+`lib/challenge/`에 Dart로 이식돼 있다. 인증 화면 앞에 붙어 있고, 통과해야 제스처
+인증으로 넘어간다.
+
+| 여기(`challenge_response/`) | 앱(`lib/challenge/`) |
+|---|---|
+| 임계값 도출 (`04_derive_thresholds.py`) | 도출된 값을 서버에서 받아 쓴다 |
+| 웹캠 프로토타입 (`run_challenge.py`) | 실기기 카메라 |
+| 규칙의 기준 구현 | 이식본 |
+
+### 두 구현이 갈라지지 않게 하는 방법
+
+```bash
+python scripts/export_dart_golden.py     # 규칙을 고쳤으면 반드시 다시 실행
+```
+
+파이썬을 **실제로 돌린 결과**를 `test/challenge/golden/cross_impl.json`에 남기고,
+Dart 테스트가 그 파일과 비교한다(42건). 손으로 옮긴 기대값이 아니다.
+
+규칙을 고치고 골든을 다시 뽑지 않으면 `tests/test_dart_golden.py`가 실패한다.
+그게 없으면 Dart 쪽은 **옛 규칙을 통과시키면서 초록으로 남는다.**
+
+### 임계값을 다시 뽑았다면
+
+```bash
+cd ../backend
+python scripts/import_challenge_config.py --dry-run
+python scripts/import_challenge_config.py
+```
+
+앱은 `GET /config`로 받으므로 **앱 재배포도 서버 재시작도 필요 없다.**
+
+### 앱에서만 생기는 제약
+
+- **검출 신뢰도 관문이 꺼져 있다.** 앱의 `hand_landmarker` 3.0.1이 신뢰도를 주지
+  않는다. `tracking.min_detection_score`(0.938)가 적용되지 않고
+  `TRACKING_UNSTABLE`이 발생하지 않는다.
+- **프레임 공백 기준을 실측에서 유도한다.** 실기기가 13~16fps라 고정 상수로는
+  이동 윈도우가 계속 비워졌다. `tracking.frameStale*`(앱 전용 설정)로 조정한다.
+- **판정이 기기 안에서 끝난다.** 서버가 결과를 검증하지 않아 앱을 조작하면
+  우회된다. 실제 출입 통제에 쓰려면 서버 판정으로 옮겨야 한다.
+
+자세한 것은 저장소 루트 `README.md`의 "안티스푸핑 Challenge" 절.
+
 ## 1. 설치
 
 Python **3.10 또는 3.11**을 쓴다. (mediapipe 0.10.14는 3.12를 지원하지 않는다.)
@@ -358,6 +404,8 @@ SPEC 4.11 목표 10개 중 **9개 달성** (5명 기준, 2026-09-16).
 `--rule-version`으로 한 버전만 볼 수 있다.
 
 ## 5. 알려진 한계
+
+> 앱 이식본에만 있는 한계(신뢰도 관문 비활성, 앱 판정이라 우회 가능)는 0장을 볼 것.
 
 ### 5.1 `NEG_halffist`: FIST 쪽은 손끝 거리 게이트로 막고, OPEN_PALM 쪽은 수용한다
 

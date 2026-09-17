@@ -71,7 +71,7 @@ flutter run --release    # 또는 그냥 flutter run (디버그)
 
 ```bash
 flutter analyze   # 경고 0개여야 한다
-flutter test      # 상태 머신 / 오버레이 / 화면 전환 테스트 22개
+flutter test      # 340개 (상태 머신·오버레이·화면 전환 + 안티스푸핑 Challenge 237개)
 ```
 
 테스트는 `kUseFakeLandmarks` 값과 무관하게 항상 `FakeLandmarkSource`를 주입한다
@@ -92,22 +92,24 @@ flutter test      # 상태 머신 / 오버레이 / 화면 전환 테스트 22개
 
 | 플래그 | 기본값 | 설명 |
 |---|---|---|
-| `kUseMockApi` | `true` | `true`면 `MockApiClient`(지연·랜덤 점수·5% 타임아웃), `false`면 `HttpApiClient`(실서버 연동 완료) |
+| `kUseMockApi` | **`false`** | `false`면 `HttpApiClient`(실서버). `true`면 `MockApiClient`(지연·랜덤 점수·5% 타임아웃) |
 | `kUseFakeLandmarks` | `false` | `false`면 `OnDeviceLandmarkSource`(실제 카메라 + MediaPipe), `true`면 `FakeLandmarkSource`(사인파 가짜 손). 에뮬레이터에서 돌릴 때만 `true`로 바꾼다 |
 | `kDefaultEnrollTakes` | `3` | 등록 회차 수의 **기본값**. 실제 값은 서버 `GET /config`의 `enrollmentTakes` |
-| `kRecordDuration` | `2000ms` | 한 번의 캡처에서 프레임을 모으는 시간 |
+| `kRecordDuration` | `4000ms` | 캡처 시간의 **기본값**. 실제 값은 서버 `GET /config`의 `captureDurationMs`<br>⚠️ 이 값은 AI 모델의 입력 feature다. 바꾸면 기존 등록이 무효다 |
 | `kNominalFps` | `30` | 카메라 명목 fps. 서버로 보내는 `nominalFps` 값 |
 | `kMinFramesForVerify` | `20` | 이보다 적게 모이면 서버로 보내지 않고 재시도를 안내 |
-| `kHandReadyFrameThreshold` | `10` | 이만큼 연속 검출되면 카운트다운 시작 |
-| `kHandLostFrameThreshold` | `15` | 이만큼 연속으로 손이 사라지면 수집을 버리고 처음부터 |
+| `kHandReadyDuration` | `400ms` | 이만큼 연속 검출되면 카운트다운 시작 |
+| `kHandGapTolerance` | `300ms` | 이보다 짧은 공백은 연속이 끊긴 것으로 보지 않는다 |
+| `kHandLostDuration` | `700ms` | 이만큼 손이 안 보이면 수집을 버리고 처음부터 |
+| `kCountdownSeconds` | `2` | 카운트다운 길이 |
 | `kGestureIds` | `G1`~`G5` | 서버가 아는 수어 암호 ID. 홈 화면에서 고른 값이 `gestureId`로 전송된다 |
 | `kPluginProvidesHandedness` | `false` | 플러그인이 좌/우를 주지 않아 `handedness`를 보내지 않는다 (아래 "알려진 제약") |
+| `kShowChallengeDebug` | `true` | Challenge 진단 패널과 서버 로그 전송. 시연 전에 끈다 (`lib/screens/challenge_screen.dart`) |
 | `kApiBaseUrl` | (빌드 시 주입) | `--dart-define=SIGNID_API_BASE=...` |
 
 홈 화면 하단에 현재 모드(목 API / 가짜 랜드마크)가 칩으로 표시된다.
 
-실제 서버로 붙일 때는 `kUseMockApi`를 `false`로 바꾸고, 서버 주소는 코드에 넣지 말고
-빌드 시 주입한다. 실기기에서는 PC의 LAN IP를 쓴다(localhost는 폰 자신을 가리킨다):
+서버 주소는 코드에 넣지 말고 빌드 시 주입한다. 실기기에서는 PC의 LAN IP를 쓴다(localhost는 폰 자신을 가리킨다):
 
 ```bash
 # 백엔드: cd backend && uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -192,6 +194,7 @@ lib/
     config.dart                  플래그와 튜닝 상수
     theme.dart                   색상/타이포/모양 토큰
     hand_connections.dart        MediaPipe 21점 연결 정의
+    screen_rotation.dart         센서 → 화면 회전 (오버레이와 판정이 공유)
   challenge/                     안티스푸핑 판정 (challenge_response 이식)
     challenge_config.dart        서버가 주는 임계값 (앱에 상수 없음)
     geometry.dart                각도·손크기·손끝거리
@@ -201,9 +204,11 @@ lib/
     challenge_generator.dart     무작위 동작 생성 (Random.secure)
     challenge_state_machine.dart 순서·시간·이탈 관문·반대방향 규칙
     hand_sketch.dart             안내 그림 좌표 (판정 규칙에서 생성)
+    challenge_debug_format.dart  판정 로그 한 줄 형식
   models/
     landmark.dart                Landmark, HandFrame
     verify.dart                  VerifyRequest, VerifyResponse
+    challenge_messages.dart      Challenge 안내·실패 문구
     enroll.dart                  EnrollRequest, EnrollResponse
     auth_log.dart                AuthLog, MonthlyStat
   services/
@@ -212,21 +217,27 @@ lib/
     fake_landmark_source.dart
     api_client.dart              추상 인터페이스
     mock_api_client.dart
-    http_api_client.dart         스텁 (TODO 주석만)
+    http_api_client.dart         실서버 연동 (config/users/verify/enroll/logs/stats/debug)
+    challenge_debug_sink.dart    판정 로그를 서버로 (fire and forget)
   state/
     capture_session.dart         손 탐색→카운트다운→수집 공용 절차
     auth_flow_controller.dart
     enroll_controller.dart
+    challenge_controller.dart    카메라 스트림 → Observation (판정 규칙은 없다)
     admin_controller.dart
     providers.dart               DI 지점
   screens/
-    home_screen.dart             사용자 선택 + 3개 진입점
+    home_screen.dart             사용자 선택·추가 + 3개 진입점
+    challenge_screen.dart        동작 확인 (인증 앞단)
     auth_screen.dart             ★ 가장 중요한 화면
     result_screen.dart
     enroll_screen.dart
+    add_user_sheet.dart
     admin_screen.dart
   widgets/
     hand_overlay_painter.dart    좌표 변환이 격리된 곳
+    challenge_guide.dart         요청 동작 그림 (손 뼈대 + 화살표)
+    challenge_move_debug.dart    이동 판정 진단 패널
     capture_ring.dart
     primary_button.dart
     secondary_button.dart
@@ -235,7 +246,17 @@ lib/
 
 ---
 
-## 인증 상태 머신
+## 인증 흐름
+
+홈에서 "인증하기"를 누르면 **동작 확인(Challenge)** 을 먼저 거친다. 통과해야 제스처
+인증으로 넘어가고, 실패하면 `/verify`를 호출하지 않는다 (아래 "안티스푸핑 Challenge").
+
+```
+HomeScreen → ChallengeScreen → AuthScreen → ResultScreen
+             (안티스푸핑)       (제스처 인증)
+```
+
+### 캡처 상태 머신
 
 `lib/state/auth_flow_controller.dart` + `lib/state/capture_session.dart`.
 
@@ -243,10 +264,10 @@ lib/
 idle          카메라 켜짐. "수어 암호를 입력하세요". 인증 버튼 활성
    ↓ 인증 버튼
 handSearching 손을 찾는 중. "손을 원 안에 위치시켜 주세요". 원 테두리 = 회색
-   ↓ 연속 10프레임 검출
-handReady     "3초 후 시작합니다". 원 테두리 = 민트. 3→2→1 카운트다운
+   ↓ 400ms 연속 검출 (프레임 수가 아니라 시간)
+handReady     "2초 후 시작합니다". 원 테두리 = 민트. 2→1 카운트다운
    ↓ 카운트다운 종료
-recording     2000ms 수집. "동작을 수행하세요". 원 테두리 = 진행률 아크
+recording     서버가 정한 시간(기본 4000ms) 수집. 원 테두리 = 진행률 아크
    ↓ 수집 종료
 uploading     "확인 중입니다". 원 안에 인디케이터
    ↓ 응답
@@ -268,20 +289,27 @@ done          결과 화면으로 전환
 
 ```json
 {
-  "userId": "kim",
-  "capturedAt": "2026-08-24T10:39:01+09:00",
+  "userId": "eunjung",
+  "gestureId": "G1",
+  "camera": { "width": 720, "height": 480 },
+  "capturedAt": "2026-09-18T10:39:01+09:00",
   "nominalFps": 30,
-  "durationMs": 2000,
+  "durationMs": 4000,
   "frames": [
-    { "tMs": 0,  "handedness": "Right", "score": 0.98,
+    { "tMs": 0,  "score": 0.6,
       "lm": [[0.51,0.62,0.00], [0.53,0.58,-0.01], "...21개..."] },
-    { "tMs": 33, "handedness": "Right", "score": 0.97, "lm": ["..."] }
+    { "tMs": 71, "score": 0.6, "lm": ["..."] }
   ]
 }
 ```
 
+- `handedness`는 **보내지 않는다.** 플러그인이 좌/우를 주지 않는다 (아래 "알려진 제약").
+- `score`는 측정값이 아니라 플러그인 하한값(0.6)이다. "이 값 이상"이라는 뜻이다.
+- `camera`가 없으면 서버가 422 `missing_camera_size`로 거절한다. 종횡비 보정에 필요하다.
+- **좌표는 원본 그대로다.** 회전·미러·정규화를 일절 적용하지 않는다.
+
 등록(`EnrollRequest`)은 같은 프레임 구조를 회차 배열(`takes`)로 감싼 형태다.
-**등록 스키마는 서버 팀과 아직 확정되지 않았다.**
+스키마는 `backend/README.md` 4장에 확정돼 있고 `backend/examples/`에 완전한 예시가 있다.
 
 ---
 
@@ -503,16 +531,24 @@ req=MOVE_LEFT axis=y+ (축비 47.25) label=MOVE_DOWN
 | 1단계에는 이탈 관문이 없다 | 시작 시점에 이미 1단계 손 모양이면 그대로 통과된다. 매번 시작 자세를 요구하는 비용이 더 크다고 봤다(challenge_response README 5.7). 2·3단계에는 관문이 있어 정지된 손 하나로 전체를 통과할 수는 없다 |
 | 이동 방향 근거가 좁다 | `directionMap`의 상하는 참가자 1명(P05)의 영상 4개에 기댄다 |
 | `shapeConfidenceMin`이 null | 분포가 겹쳐 도출하지 못했다. 신뢰도 게이트를 끈 채로 간다 |
-| 실기기 미검증 | Challenge 단계 자체를 실기기에서 아직 돌려보지 않았다. 통과율과 체감 시간을 측정해 `perActionTimeoutMs`·`escapeFrames`·`shapeHoldFrames`를 조정해야 한다 |
+| **통과율 미측정** | 실기기에서 3단계를 끝까지 통과한 세션이 **1회(8.5초)** 다. 정상 사용자가 몇 번에 한 번 통과하는지, 어느 단계에서 주로 막히는지는 표본이 없다. `backend/logs/challenge_debug.log`의 `blocked=`·`verdict=`를 세어 보면 나온다 |
+| 임계값이 거치 조건에서 도출됨 | 파일럿은 폰을 **고정하고** 손만 움직였다. 손에 들면 폰도 따라가 상대 변위가 줄어든다. 실사용 조건에서 다시 재야 한다 |
 
 ## 실기기 검증 기록
 
 Galaxy A34 5G (SM-A346N, Android 14, arm64)에서 릴리스 빌드로 확인했다.
-카메라 프리뷰, MediaPipe 손 검출, 오버레이 정렬, 6단계 상태 머신,
-결과 화면 자동 복귀까지 전부 동작한다.
+카메라 프리뷰, MediaPipe 손 검출, 오버레이 정렬, 캡처 상태 머신, 안티스푸핑
+Challenge 3단계, 제스처 인증, 결과 화면까지 전부 동작한다.
 
-검증 과정에서 실기기에서만 드러난 문제 세 가지를 고쳤다. 다른 기기로 옮길 때
-같은 증상이 나오면 여기부터 볼 것.
+검증 과정에서 **실기기에서만 드러난 문제**를 여러 번 고쳤다. 다른 기기로 옮길 때
+같은 증상이 나오면 여기부터 볼 것. 공통점이 있다 — 전부 화면 표시 쪽은 멀쩡한데
+판정 입력 쪽이 틀렸거나, 프레임 수로 센 값이 낮은 fps에서 다른 시간이 된 경우다.
+
+**0. 안티스푸핑 Challenge (2026-09-18)**
+
+3단계 전체 통과, **8.5초**. 버그 두 건을 고친 뒤의 결과다 — 판정 입력에 센서 회전
+누락(축 90도 swap), 프레임 공백 기준 100ms 고정이 14fps에서 이동 윈도우를 계속 비움.
+둘 다 위의 "겪은 버그" 절에 자세히 적었다.
 
 **1. 오버레이 좌표 회전**
 
@@ -521,8 +557,16 @@ Galaxy A34 5G (SM-A346N, Android 14, arm64)에서 릴리스 빌드로 확인했�
 돌려주지 않는다. 그래서 표시할 때 `sensorOrientation`만큼 직접 회전시켜야 한다
 (`OnDeviceLandmarkSource.transform`의 `rotationDegrees`).
 
-이 기기는 전면 카메라 `sensorOrientation = 270`이고, 270도 회전에서 정확히
-겹쳤다. 회전을 맞추면 추가 미러링은 필요 없다(`mirror: false`).
+이 기기는 전면 카메라 `sensorOrientation = 270`이고, 270도 회전에서 정확히 겹쳤다.
+
+⚠️ **미러링은 그 뒤에 두 번 바뀌었다.** 처음에는 프리뷰를 직접 반전하고
+오버레이는 `mirror: false`로 뒀는데, `camera_android_camerax` 0.7.4+6이 전면
+프리뷰를 이미 반전해 그리는 것을 확인하고 프리뷰 반전을 빼고 오버레이를
+`mirror: true`로 바꿨다. 지금 값이 그것이다.
+
+**회전 규칙은 `lib/core/screen_rotation.dart` 한 곳에 있다.** 오버레이와 Challenge
+판정이 같은 함수를 쓴다. 두 군데에 따로 두었다가 판정 쪽에서 빠져 이동 방향이
+90도 돌아간 적이 있다.
 
 다른 기기에서 뼈대가 손을 벗어나면 실행 직후 로그부터 확인한다.
 

@@ -43,7 +43,7 @@ startup에서 자동으로 한다:
 
 - `alembic upgrade head` (스키마 생성·마이그레이션)
 - `ai.encoder.load_model()` **1회** (가중치 로드, 약 1초)
-- 기본 데이터: 제스처 G1~G5, threshold 3종(far1 활성), `app_config` 기본값. 이미 있으면 덮어쓰지 않는다.
+- 기본 데이터: 제스처 G1~G5, 운영점 2종 × 관문 2개(`default` 활성), `app_config` 기본값(Challenge 설정 포함). 이미 있으면 덮어쓰지 않는다.
 
 팀 사용자 (인증 이력은 만들지 않는다. 실제 테스트로만 쌓인다):
 
@@ -174,7 +174,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | 필드 | 필수 | 설명 |
 |---|---|---|
 | `userId` | ✅ | |
-| `gestureId` | ✅ | 운영 설정(`USE_GESTURE_CLASSIFIER=false`)에서 필수 |
+| `gestureId` | ✅ | 템플릿 조회 키. 서버는 분류하지 않고 이 값으로 찾는다 |
 | `camera.width`, `camera.height` | ✅ | |
 | `frames` | ✅ | |
 | `capturedAt`, `nominalFps`, `durationMs` | 선택 | 기록용 |
@@ -184,13 +184,13 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 ```json
 {
   "score": 0.7134,
-  "threshold": 0.627516,
+  "threshold": 0.342350,
+  "gestureScore": 0.9871,
+  "gestureThreshold": 0.902032,
   "passed": true,
   "reason": null,
-  "predictedGesture": "G3",
-  "gestureConfidence": 0.93,
   "gestureId": "G3",
-  "modelVersion": "handonly-supcon-v1.0.0",
+  "modelVersion": "shared-dual-head-v1.1.0",
   "latencyMs": 42
 }
 ```
@@ -200,29 +200,29 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 ```json
 {
   "score": null,
-  "threshold": 0.627516,
+  "threshold": 0.342350,
+  "gestureScore": null,
+  "gestureThreshold": 0.902032,
   "passed": false,
-  "reason": "gesture_mismatch",
-  "predictedGesture": "G2",
-  "gestureConfidence": 0.9,
+  "reason": "no_template",
   "gestureId": "G2",
-  "modelVersion": "handonly-supcon-v1.0.0",
+  "modelVersion": "shared-dual-head-v1.1.0",
   "latencyMs": 7
 }
 ```
 
-> **⚠️ `score`는 nullable이다.** `gesture_mismatch`, `no_template`처럼 유사도 비교를 하지 않았으면 `null`.
+> **⚠️ `score`와 `gestureScore`는 nullable이다.** `no_template`처럼 유사도 비교를 하지 않았으면 `null`.
 > 0.0으로 채우지 않는 이유: "비교를 안 했다"와 "유사도가 0이다"가 구분되지 않는다.
 > 앱은 `score`를 `double?`로 받고, 결과 화면에서 `null`이면 점수를 표시하지 않는다.
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
-| `score` | `number \| null` | 코사인 유사도 |
-| `threshold` | `number \| null` | 이번 판정에 쓴 값 (서버 활성 threshold) |
-| `passed` | `bool` | |
+| `score` | `number \| null` | **user 관문** 유사도 (본인인지) |
+| `threshold` | `number \| null` | user 관문 임계값 Tu (서버 활성 운영점) |
+| `gestureScore` | `number \| null` | **gesture 관문** 유사도 (등록한 동작인지) |
+| `gestureThreshold` | `number \| null` | gesture 관문 임계값 Tg |
+| `passed` | `bool` | 두 관문을 **모두** 넘어야 true |
 | `reason` | `string \| null` | 거부 사유 ([5.1](#51-인증-거부-사유-auth_logsfail_reason)). 통과 시 `null` |
-| `predictedGesture` | `string \| null` | 분류 모델 결과 |
-| `gestureConfidence` | `number \| null` | |
 | `gestureId` | `string \| null` | 템플릿 조회에 실제로 쓴 제스처 |
 | `modelVersion` | `string` | |
 | `latencyMs` | `int` | 서버 처리 시간 |
@@ -281,7 +281,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
   "gestureId": "G3",
   "takeCount": 3,
   "required": 3,
-  "modelVersion": "handonly-supcon-v1.0.0"
+  "modelVersion": "shared-dual-head-v1.1.0"
 }
 ```
 
@@ -308,7 +308,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
   "enrollmentGestures": 1,
   "captureDurationMs": 4000,
   "handRequired": "right",
-  "modelVersion": "handonly-supcon-v1.0.0"
+  "modelVersion": "shared-dual-head-v1.1.0"
 }
 ```
 
@@ -325,13 +325,13 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
       "userName": "김길동",
       "department": "개발팀",
       "claimedGestureId": "G3",
-      "predictedGestureId": "G3",
-      "gestureConfidence": 0.93,
       "score": 0.7134,
-      "threshold": 0.627516,
+      "threshold": 0.342350,
+      "gestureScore": 0.9871,
+      "gestureThreshold": 0.902032,
       "passed": true,
       "failReason": null,
-      "authModelVersion": "handonly-supcon-v1.0.0",
+      "authModelVersion": "shared-dual-head-v1.1.0",
       "gestureModelVersion": "handonly-gesture-1dcnn-v1.0.0",
       "latencyMs": 42,
       "createdAt": "2026-09-16T01:39:01.123456+00:00"
@@ -369,14 +369,17 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 ]
 ```
 
-### 4.6 현재 앱 코드와 다른 점 (앱 수정 체크리스트)
+### 4.6 앱 수정 체크리스트 (✅ 2026-09-17 전부 반영됨)
 
-| 항목 | 현재 앱 (`lib/`) | 백엔드 규격 |
+> 이 표는 앱을 백엔드 규격에 맞출 때 쓴 목록이다. **모두 반영됐고 실기기에서
+> 동작을 확인했다.** 다음에 규격이 갈라지면 같은 형식으로 다시 쓴다.
+
+| 항목 | 당시 앱 (`lib/`) | 백엔드 규격 |
 |---|---|---|
 | 경로 | `/v1/verify`, `/v1/enroll`, `/v1/auth-logs`, `/v1/stats/monthly` | `/verify`, `/enroll`, `/logs`, `/stats/monthly` (접두사 없음) |
 | `VerifyRequest` | `camera` 없음, `gestureId` 없음 | `camera: {width, height}` **필수**, `gestureId` 선택 |
 | `VerifyResponse.score` | `double` 필수 | **`double?`** |
-| `VerifyResponse` 추가 필드 | — | `predictedGesture`, `gestureConfidence`, `gestureId`, `modelVersion` |
+| `VerifyResponse` 추가 필드 | — | `gestureScore`, `gestureThreshold`, `gestureId`, `modelVersion`<br>(dual-head 이전에는 `predictedGesture`, `gestureConfidence`였다) |
 | `EnrollRequest` | `{userId, capturedAt, nominalFps, takeCount, takes: [[frame]]}` | `{userId, gestureId, camera, takes: [{takeNo, capturedAt, nominalFps, durationMs, frames}]}` |
 | `EnrollRequest.capturedAt` | `toIso8601String()` (오프셋 없음) | take별, 오프셋 포함 |
 | `EnrollResponse` | `acceptedTakes`, `templateId`, 실패 시 `enrolled: false` | `takeCount`, `required`, `modelVersion`. 실패는 **422** |
@@ -424,7 +427,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | HTTP | `code` | `reason` | 발생 |
 |---|---|---|---|
 | 422 | `invalid_request` | `schema_validation` | JSON 타입·필수 필드 오류 (`detail.errors`에 위치) |
-| 422 | `invalid_request` | `gesture_id_required` | `/verify`, `USE_GESTURE_CLASSIFIER=false`인데 `gestureId` 없음 |
+| 422 | `invalid_request` | `gesture_id_required` | `/verify`에 `gestureId` 없음 |
 | 422 | `invalid_request` | `take_count_mismatch` | `/enroll` take 개수·번호 불일치 |
 | 422 | `invalid_request` | `unknown_gesture` | `/enroll` 없는 제스처 ID |
 | 404 | `not_found` | `user_not_found` | `/verify`, `/enroll`, `DELETE /users/{id}` |
@@ -594,21 +597,23 @@ PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로
    (v1.0.0: `torch==2.8.0`. CPU 휠로 충분하다.)
 4. **가중치 확인**: `python ai_release/smoke_test.py`
 5. **계약 검증**: `python scripts/verify_ai_release.py`
-   - 시그니처, 임베딩 `(128,)` `float32`, L2 norm=1, 결정성, `embed_batch` 일치, 분류 라벨, 거절 조건 6종.
+   - manifest 해시, 공개 API, 내부 락, **두 헤드** 각각 `(128,)` `float32` L2 norm=1,
+     `embed_both` 일치, 결정성, 배치 일치, 운영점별 Tu/Tg, 거절 조건 8종 (전체 20항목).
    - `FAIL`이 있으면 종료 코드 1. `embed`부터 줄줄이 실패하면 7.0의 입력 형태가 다른 것이다.
    - `[WARN] 사유 코드 ...`가 뜨면 `_REASON_PATTERNS` 조정.
 6. **threshold 반영**: `python scripts/import_thresholds.py` (`ai/thresholds.json` → `app/default_thresholds.json`).
-   운영점 이름을 `far_1_percent`→`far1` 식으로 바꾸고 값은 풀 정밀도로 옮긴다.
-   서버를 띄우면 새 `MODEL_VERSION`에 대해 threshold 3종이 자동으로 들어간다 (이미 그 버전 행이 있으면 건드리지 않는다).
+   릴리스의 `operating_points{default, demo_relaxed}`를 `operatingPoints[{basis, userThreshold, gestureThreshold}]`로
+   옮긴다(값은 풀 정밀도).
+   서버를 띄우면 새 `MODEL_VERSION`에 대해 운영점 2종 × 관문 2개가 자동으로 들어간다 (이미 그 버전 행이 있으면 건드리지 않는다).
    파일을 고치기 전에 서버를 먼저 띄웠다면 `thresholds` 테이블에서 새 `model_version` 행을 지우고 재시작한다.
    값은 재색인 후 `GET /admin/thresholds`로 확인 (활성 모델 버전 기준으로 보여준다).
 7. **서버 재시작 후 재색인**:
    ```bash
    curl localhost:8000/health        # status=degraded, modelVersion=옛 버전, loadedModelVersion=새 버전
    curl -X POST localhost:8000/admin/reindex -H 'Content-Type: application/json' \
-        -d '{"modelVersion": "handonly-supcon-v1.0.0", "dryRun": true}'     # 실패 건 먼저 확인
+        -d '{"modelVersion": "shared-dual-head-v1.1.0", "dryRun": true}'     # 실패 건 먼저 확인
    curl -X POST localhost:8000/admin/reindex -H 'Content-Type: application/json' \
-        -d '{"modelVersion": "handonly-supcon-v1.0.0", "dryRun": false}'
+        -d '{"modelVersion": "shared-dual-head-v1.1.0", "dryRun": false}'
    curl localhost:8000/health        # status=ok
    ```
    재색인 전까지 `/verify`는 503 `model_version_mismatch`다.
@@ -711,7 +716,8 @@ backend/
 │   ├── schemas.py               # Pydantic (camelCase)
 │   ├── errors.py                # {"detail": {code, reason, message}}
 │   ├── seed.py, default_thresholds.json
-│   ├── routers/                 # verify, enroll, users, logs, config(+health), admin
+│   ├── default_challenge_config.json   # 안티스푸핑 Challenge 임계값 (앱에 내려준다)
+│   ├── routers/                 # verify, enroll, users, logs, config(+health), admin, debug
 │   └── services/
 │       ├── ai_gateway.py        # ⚠️ AI 입력 형태 변환·사유 코드 (교체 시 여기만)
 │       ├── auth_service.py      # /verify
@@ -728,6 +734,8 @@ backend/
 │   ├── seed_demo_data.py
 │   ├── clear_enrollments.py     # 등록 원본·임베딩·템플릿 삭제 (촬영 조건이 바뀐 경우)
 │   ├── import_thresholds.py     # ai/thresholds.json → app/default_thresholds.json
+│   ├── import_challenge_config.py  # challenge_response/configs → DB (6.5장)
 │   └── verify_ai_release.py
+├── logs/                        # 앱이 보낸 Challenge 판정 로그 (git 제외, 6.6장)
 └── tests/
 ```
