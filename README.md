@@ -163,6 +163,17 @@ cd challenge_response && pytest                       # 236개 (test_guide_overl
 | `kGestureIds` | `G1`~`G5` | 서버가 아는 수어 암호 ID. 홈 화면에서 고른 값이 `gestureId`로 전송된다 |
 | `kPluginProvidesHandedness` | `false` | 플러그인이 좌/우를 주지 않아 `handedness`를 보내지 않는다 (아래 "알려진 제약") |
 | `kShowChallengeDebug` | `true` | Challenge 진단 패널과 서버 로그 전송. 시연 전에 끈다 (`lib/screens/challenge_screen.dart`) |
+
+원 테두리 색이 의미를 나눈다. **진행률 아크만 보라(`AppColors.progress`)** 다 —
+초록으로 두면 차오르는 아크가 "정답/통과"로 읽히는데 실제로는 촬영 진행도일 뿐이다.
+
+| 색 | 뜻 |
+|---|---|
+| 회색 | 손을 찾는 중 |
+| 민트 | 준비됨 / 판정 중 |
+| 보라 | **촬영·준비 진행률** (판정 결과가 아니다) |
+| 초록 | 통과 |
+| 빨강 | 실패 |
 | `kApiBaseUrl` | (빌드 시 주입) | `--dart-define=SIGNID_API_BASE=...` |
 
 홈 화면 하단에 현재 모드(목 API / 가짜 랜드마크)가 칩으로 표시된다.
@@ -329,8 +340,15 @@ Challenge는 **손이 원 안에 들어올 때까지 기다린 뒤** 시작한�
 ```
 waitHand   "손을 원 안에 위치시켜 주세요". 테두리 = 회색. **시계 멈춤**
    ↓ 400ms 연속 검출 (timing.waitHandReadyMs)
-ACTION 1~3  여기서부터 perActionTimeoutMs와 totalTimeoutMs가 흐른다
+ACTION 1    perActionTimeoutMs와 totalTimeoutMs가 흐른다
+   ↓ 통과
+준비 1.5초  "1단계 완료 · 다음: 주먹 쥐기". 테두리 = 초록. **시계 멈춤**
+   ↓ timing.stepPrepareMs
+ACTION 2    …
 ```
+
+**시계가 멈추는 구간이 셋이다.** 손을 기다릴 때, 단계 사이 준비 시간, 이탈 관문
+대기. 셋 다 사용자가 화면을 읽고 손을 만드는 시간이라 판정 제한으로 재면 안 된다.
 
 ### 캡처 상태 머신
 
@@ -571,6 +589,29 @@ challenge 설정          0.938         ← 정상 영상 검출 신뢰도 분�
 관문 자체가 한 번도 눌리지 않았다. 지금은 골든에 `score=None`·낮은 값·경계값
 3건을 넣었고, `flow_test.dart`의 가짜 소스도 실기기와 같은 0.6을 흘린다.
 
+### 겪은 버그: 프레임이 두 번 수집된 것 (인증이 헐거워진 원인)
+
+Challenge를 거쳐 인증하면 4초에 **119~120프레임**이 모였다. Challenge 이전에는
+같은 4초에 52~62개였으니 정확히 두 배다.
+
+```
+OnDeviceLandmarkSource.stop()이 검출 스트림 구독을 끊지 않았다
+  → 화면을 옮기며 stop() → start() 하면 구독이 하나 더 붙는다
+  → 네이티브 이벤트 채널이라 같은 검출 결과가 구독 수만큼 흘러나온다
+```
+
+**이게 인증을 통째로 헐겁게 만들었다.** 모델 입력의 절반이 속도 feature인데,
+같은 프레임이 두 번씩 들어가면 프레임 간 변위가 0이 된다. 손이 거의 안 움직이는
+것처럼 보여 동작 간 차이도 사람 간 차이도 뭉개진다. 남의 동작도 다른 사람도
+통과하던 이유가 이것이다.
+
+지금은 `stop()`이 구독·카메라·플러그인을 모두 정리하고, `CaptureSession`이
+버퍼에 넣기 전에 **tMs 단조 증가**를 보장한다(등록 2회차의 422
+`non_monotonic_timestamps`도 같은 원인으로 보인다).
+
+`test/frame_duplication_test.dart`가 이 상황을 재현한다. 고치기 전 결과가
+실기기 로그와 정확히 일치했다 — 120장.
+
 ### 겪은 버그: 판정 입력에 센서 회전을 빼먹은 것
 
 실기기에서 화살표대로 움직여도 "요청한 방향과 다르다"가 계속 떴다.
@@ -635,6 +676,27 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json'   
 | `shapeConfidenceMin`이 null | 분포가 겹쳐 도출하지 못했다. 신뢰도 게이트를 끈 채로 간다 |
 | **통과율 미측정** | 실기기에서 3단계를 끝까지 통과한 세션이 **1회(8.5초)** 다. 정상 사용자가 몇 번에 한 번 통과하는지, 어느 단계에서 주로 막히는지는 표본이 없다. `backend/logs/challenge_debug.log`의 `blocked=`·`verdict=`를 세어 보면 나온다 |
 | 임계값이 거치 조건에서 도출됨 | 파일럿은 폰을 **고정하고** 손만 움직였다. 손에 들면 폰도 따라가 상대 변위가 줄어든다. 실사용 조건에서 다시 재야 한다 |
+
+## 인증 성공 후 이어지는 서비스
+
+이 인증이 **2차 인증**으로 쓰인다는 것을 보여주는 흐름이다. 성공 화면에만
+"계속하기"가 뜨고, 누르면 외부 브라우저로 서비스 주소를 연다.
+
+주소는 서버가 준다(`GET /config`의 `postAuthUrl`, 기본 `https://www.naver.com`).
+앱에 박아두면 바꿀 때마다 다시 배포해야 한다.
+
+```bash
+curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json'   -d '{"postAuthUrl": "https://portal.example.com/sso"}'
+```
+
+- **https만 연다.** 서버가 422로 막고, 앱도 받은 값을 다시 확인한다
+  (`ServerConfig.hasPostAuthUrl`). 외부 브라우저로 여는 주소라 다른 스킴은
+  무엇이 열릴지 알 수 없다
+- 서버가 주소를 안 주면(오래된 서버, 응답 실패) 버튼을 숨기고 기존
+  "확인" + 자동 복귀로 돌아간다
+- 실패 화면에는 띄우지 않는다
+- 앱 안 웹뷰가 아니라 외부 브라우저인 이유: 2차 인증을 마치고 원래 쓰던
+  브라우저 세션으로 돌아가는 흐름이기 때문이다
 
 ## 실기기 검증 기록
 
