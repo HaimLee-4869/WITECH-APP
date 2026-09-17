@@ -245,6 +245,38 @@ class ChallengeStepsOut(ResponseModel):
     num_moves: int = Field(ge=0, le=4)
 
 
+class ChallengeContinuityOut(ResponseModel):
+    """연속 세션에서 손이 바뀌었는지 보는 검사.
+
+    Challenge와 제스처 인증을 한 번의 촬영으로 묶으면 "Challenge는 본인 손,
+    인증은 피해자 영상"을 막을 수 있다. 다만 손을 빼지 않고 화면을 들이미는
+    경우가 남는데, 그때는 손 크기와 손목 위치가 한 프레임 사이에 튄다.
+
+    ⚠️ **기본은 꺼져 있다.** 정상 세션의 프레임 간 변화량을 아직 재지 않았다.
+    임계값을 추측해서 넣으면 정상 사용자를 막거나 아무것도 막지 못한다.
+    앱이 측정값을 디버그 로그에 남기므로, 세션이 쌓이면 분포에서 도출한다.
+    """
+
+    enabled: bool = False
+
+    # 프레임 간 손 크기 변화 허용치(배수). null이면 미도출.
+    max_scale_jump_ratio: float | None = Field(default=None, gt=0.0, le=100.0)
+
+    # 프레임 간 손목 이동 허용치(손 크기 배수). null이면 미도출.
+    max_wrist_jump_ratio: float | None = Field(default=None, gt=0.0, le=100.0)
+
+    @model_validator(mode="after")
+    def _needs_thresholds(self):
+        if self.enabled and (
+            self.max_scale_jump_ratio is None or self.max_wrist_jump_ratio is None
+        ):
+            raise ValueError(
+                "연속성 검사를 켜려면 maxScaleJumpRatio와 maxWristJumpRatio가 모두 필요하다. "
+                "근거 없이 켤 수 없다."
+            )
+        return self
+
+
 class ChallengeConfigOut(ResponseModel):
     rule_version: str
     angle_space: str = Field(pattern=r"^(image_iso|world)$")
@@ -265,6 +297,9 @@ class ChallengeConfigOut(ResponseModel):
     timing: ChallengeTimingOut
     tracking: ChallengeTrackingOut
     steps: ChallengeStepsOut
+    continuity: ChallengeContinuityOut = Field(
+        default_factory=ChallengeContinuityOut
+    )
     shape_pool: list[str] = Field(min_length=1)
     move_pool: list[str] = Field(min_length=1)
 

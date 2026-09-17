@@ -23,6 +23,8 @@ from typing import Any
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+from sqlalchemy.exc import OperationalError  # noqa: E402
+
 from app.config import Settings  # noqa: E402
 from app.database import Database  # noqa: E402
 from app.schemas import ChallengeConfigOut  # noqa: E402
@@ -90,6 +92,8 @@ def convert(source: dict, previous: dict) -> dict:
         "steps": previous["steps"],
         "shapePool": previous["shapePool"],
         "movePool": previous["movePool"],
+        # 연속성 임계값은 앱 세션에서 재는 값이라 안티스푸핑 원본에 없다.
+        "continuity": previous.get("continuity", {"enabled": False}),
     }
     missing = []
     for src, dst in SCALARS:
@@ -136,7 +140,17 @@ def main(argv: list[str] | None = None) -> int:
     database = Database(settings.database_url)
 
     with database.session() as session:
-        previous = cfg.get_challenge_config(session)
+        # 서버를 한 번도 안 띄운 DB에는 app_config 테이블이 없다. 그때는 번들
+        # 기본값을 기준으로 비교만 한다(저장은 서버가 스키마를 만든 뒤에 된다).
+        try:
+            previous = cfg.get_challenge_config(session)
+        except OperationalError:
+            if not args.dry_run:
+                raise SystemExit(
+                    "DB에 스키마가 없다. 서버를 한 번 띄워 마이그레이션을 돌린 뒤 다시 실행할 것."
+                )
+            print("(DB에 스키마가 없어 번들 기본값과 비교한다)")
+            previous = cfg.default_challenge_config()
         converted = convert(source, previous)
         validated = ChallengeConfigOut.model_validate(converted)
 

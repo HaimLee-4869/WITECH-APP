@@ -25,7 +25,7 @@ from .movement_detector import NONE, OPPOSITE_DIRECTION, MovementDetector
 
 
 # 판정 규칙이 바뀌면 올린다. results.csv에 같이 적어 변경 전후를 비교한다.
-RULE_VERSION = "2026-09-16.opposite-first-fails"
+RULE_VERSION = "2026-09-18.continuous-session"
 
 
 class State(Enum):
@@ -45,6 +45,10 @@ class FailReason(Enum):
     TOTAL_TIMEOUT = "TOTAL_TIMEOUT"
     HAND_LOST = "HAND_LOST"
     TRACKING_UNSTABLE = "TRACKING_UNSTABLE"
+    # 판정을 멈춘 구간(결과 표시·다음 단계 준비)에서 손이 사라졌다.
+    # Challenge와 제스처 인증을 한 번의 촬영으로 묶었기 때문에, 이 구간이 비면
+    # "Challenge는 본인 손, 인증은 영상 재생"을 막지 못한다.
+    SESSION_BROKEN = "SESSION_BROKEN"
 
 
 # 재시도로 회복할 수 있는 사유. 손이 사라지거나 순서를 어긴 건 재시도 대상이 아니다.
@@ -447,6 +451,9 @@ class ChallengeStateMachine:
         # 단계 결과(PASS/FAIL) 표시. 맞게 했는지 인지할 틈을 준다.
         # 준비 시간과 마찬가지로 이 동안에는 아무 시계도 흐르지 않는다.
         if self._result_until_ms is not None:
+            broken = self._update_continuity(obs)
+            if broken is not None:
+                return broken
             if obs.timestamp_ms < self._result_until_ms:
                 self._step_started_ms = obs.timestamp_ms
                 if self._started_ms is not None:
@@ -457,6 +464,9 @@ class ChallengeStateMachine:
         # 다음 단계 준비 시간. 요청 동작을 보고 손을 만들 시간을 준다.
         # 이 동안에는 단계 제한도 전체 제한도 흐르지 않는다.
         if self._prepare_until_ms is not None:
+            broken = self._update_continuity(obs)
+            if broken is not None:
+                return broken
             if obs.timestamp_ms < self._prepare_until_ms:
                 self._step_started_ms = obs.timestamp_ms
                 if self._started_ms is not None:
@@ -514,6 +524,23 @@ class ChallengeStateMachine:
         self._lost.reset()
         self._unstable.reset()
         return None
+
+    def _update_continuity(self, obs: Observation) -> Optional[Status]:
+        """판정을 멈춘 구간에서도 손이 계속 잡히는지 본다.
+
+        결과 표시(PASS/FAIL)와 다음 단계 준비 시간에는 판정을 하지 않지만
+        **추적은 유지해야 한다.** 이 구간이 비어 있으면 통과 표시를 본 사용자가
+        손을 내리고 다른 것을 들이밀 수 있고, 그게 이 세션 구조로 막으려는 공격이다.
+
+        허용 길이는 판정 중과 같다(max_lost_frames). 한 프레임 끊김으로 실패시키면
+        정상 사용자가 죽는다.
+        """
+        if obs.hand_found:
+            self._lost.reset()
+            return None
+        if self._lost.hit(obs.timestamp_ms):
+            return self._fail(FailReason.SESSION_BROKEN, obs.timestamp_ms)
+        return self._status()
 
     def _update_tracking(self, obs: Observation) -> Optional[Status]:
         """손 소실/추적 불안정을 처리한다. 실패면 Status, 아니면 None."""

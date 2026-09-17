@@ -25,6 +25,9 @@ String challengeFailMessage(FailReason? reason) => switch (reason) {
         '전체 제한 시간이 지났습니다. 처음부터 다시 시도해주세요.',
       FailReason.trackingUnstable =>
         '손 인식이 불안정합니다. 밝은 곳에서 배경이 단순한 쪽을 보고 해주세요.',
+      FailReason.sessionBroken =>
+        '인증 도중 손이 화면에서 벗어났습니다.\n'
+            '처음부터 끝까지 손을 화면 안에 유지해주세요.',
       null => '동작을 확인하지 못했습니다. 다시 시도해주세요.',
     };
 

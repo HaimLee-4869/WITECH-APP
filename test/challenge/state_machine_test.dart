@@ -308,7 +308,8 @@ void main() {
       expect(FailReason.wrongShape.code, 'WRONG_SHAPE');
       expect(FailReason.handNotFound.code, 'HAND_NOT_FOUND');
       expect(FailReason.trackingUnstable.code, 'TRACKING_UNSTABLE');
-      expect(FailReason.values.length, 8);
+      expect(FailReason.sessionBroken.code, 'SESSION_BROKEN');
+      expect(FailReason.values.length, 9);
     });
   });
 

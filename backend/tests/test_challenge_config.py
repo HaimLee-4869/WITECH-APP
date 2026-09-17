@@ -171,10 +171,14 @@ def test_defaults_match_challenge_response_source():
     assert bundled["tracking"]["minDetectionScore"] == source["tracking"]["min_detection_score"]
 
 
-def test_import_script_dry_run_reports_no_change():
-    """번들 기본값이 원본과 같으므로 dry-run에 바뀐 값이 없어야 한다."""
+def test_import_script_dry_run_reports_no_change(tmp_path):
+    """번들 기본값이 원본과 같으므로 dry-run에 바뀐 값이 없어야 한다.
+
+    운영 DB를 보면 결과가 그 DB에 저장된 값에 좌우된다. 빈 DB로 돌린다.
+    """
     out = subprocess.run(
-        [sys.executable, "scripts/import_challenge_config.py", "--dry-run"],
+        [sys.executable, "scripts/import_challenge_config.py", "--dry-run",
+         "--database-url", f"sqlite:///{tmp_path / 't.db'}"],
         cwd=BACKEND_DIR, capture_output=True, text=True, encoding="utf-8",
     )
     assert out.returncode == 0, out.stdout + out.stderr

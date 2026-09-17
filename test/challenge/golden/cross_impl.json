@@ -1,12 +1,12 @@
 {
   "_note": "scripts/export_dart_golden.py가 만든 파이썬 실행 결과. 손으로 고치지 말 것.",
-  "ruleVersion": "2026-09-16.opposite-first-fails",
+  "ruleVersion": "2026-09-18.continuous-session",
   "fps": 30.0,
   "escapeFrames": 4,
   "extendedAngle": 175.0,
   "curledAngle": 60.0,
   "config": {
-    "ruleVersion": "2026-09-16.opposite-first-fails",
+    "ruleVersion": "2026-09-18.continuous-session",
     "angleSpace": "world",
     "coordinateFrame": "raw",
     "frameReferenceFps": 30.0,
@@ -1466,6 +1466,108 @@
       "stepIndex": 1,
       "stepsPassed": [
         true
+      ]
+    },
+    {
+      "name": "hand_lost_during_result_hold_breaks_session",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "config": {
+        "timing": {
+          "step_result_hold_ms": 1500
+        }
+      },
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5
+        },
+        {
+          "kind": "lost",
+          "frames": 40
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "SESSION_BROKEN",
+      "stepIndex": 1,
+      "stepsPassed": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "hand_lost_during_prepare_breaks_session",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "config": {
+        "timing": {
+          "step_result_hold_ms": 0,
+          "step_prepare_ms": 1500
+        }
+      },
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5
+        },
+        {
+          "kind": "lost",
+          "frames": 40
+        }
+      ],
+      "state": "FAIL",
+      "failReason": "SESSION_BROKEN",
+      "stepIndex": 1,
+      "stepsPassed": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "name": "brief_dropout_during_hold_is_tolerated",
+      "actions": [
+        "OPEN_PALM",
+        "FIST",
+        "MOVE_RIGHT"
+      ],
+      "config": {
+        "timing": {
+          "step_result_hold_ms": 1500
+        }
+      },
+      "script": [
+        {
+          "kind": "shape",
+          "label": "OPEN_PALM",
+          "frames": 5
+        },
+        {
+          "kind": "lost",
+          "frames": 3
+        },
+        {
+          "kind": "shape",
+          "label": "FIST",
+          "frames": 60
+        }
+      ],
+      "state": "ACTION",
+      "failReason": null,
+      "stepIndex": 2,
+      "stepsPassed": [
+        true,
+        true,
+        false
       ]
     },
     {
