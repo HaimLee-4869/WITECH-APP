@@ -15,6 +15,18 @@ const String challengeSessionBrokenNotice =
 /// 세션 내내 띄우는 안내. 사람은 통과 표시를 보면 손을 내리게 돼 있다.
 const String challengeKeepHandNotice = '인증이 끝날 때까지 손을 화면 안에 유지해주세요';
 
+/// 촬영 구간의 안내. 여기서 손을 내리면 처음부터 다시 해야 한다는 것까지 말한다.
+///
+/// "유지해주세요"만으로는 왜 유지해야 하는지가 안 보인다. 대가를 알아야
+/// 사람이 손을 안 내린다.
+const String challengeRecordingKeepHandNotice =
+    '손을 내리지 마세요. 내리면 동작 확인부터 다시 합니다';
+
+/// 마지막 단계를 통과하고 촬영으로 넘어가기 직전의 안내.
+///
+/// 사용자는 여기서 "끝났다"고 생각한다. 실제로는 이제 시작이다.
+const String challengeHandOffToCaptureNotice = '손을 그대로 두세요 · 이어서 촬영합니다';
+
 /// 실패 사유별 안내.
 String challengeFailMessage(FailReason? reason) => switch (reason) {
       FailReason.handNotFound =>
@@ -57,9 +69,12 @@ String challengePrompt(Status status) {
   if (status.stepResult != null) {
     // 결과는 원 위 배지가 크게 보여준다. 아래 문구는 조용히 둔다.
     final int? done = status.justPassedStep;
-    return status.stepResult == StepOutcome.pass && done != null
-        ? '${done + 1}단계 완료'
-        : '';
+    if (status.stepResult != StepOutcome.pass || done == null) return '';
+    // 마지막 단계만 예외다. 여기서 손을 내리면 세션이 끊기는데, 사용자는
+    // 동작 확인이 끝났으니 다 끝났다고 생각한다. 그 오해를 여기서 끊는다.
+    return done == status.totalSteps - 1
+        ? challengeHandOffToCaptureNotice
+        : '${done + 1}단계 완료';
   }
   if (status.preparing) {
     // 방금 뭘 했는지 알려주고, 다음 동작을 준비할 시간을 준다.

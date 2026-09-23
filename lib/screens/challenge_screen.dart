@@ -332,7 +332,7 @@ class _Prompt extends ConsumerWidget {
       SessionPhase.idle => ('준비 중입니다…', AppColors.textSecondary),
       // 여기서 손을 내리면 세션이 끊긴다. 계속 붙잡아 둬야 한다.
       SessionPhase.recording => (
-          '수어 암호를 수행하세요',
+          '손을 그대로 둔 채 수어 암호를 수행하세요',
           AppColors.textPrimary,
         ),
       SessionPhase.uploading => ('확인 중입니다…', AppColors.textSecondary),
@@ -521,6 +521,10 @@ class _KeepHandBanner extends ConsumerWidget {
 
     // 손을 아직 안 들었으면 "들어주세요"가 먼저다. 들고 나면 "유지하세요".
     final bool keeping = flow.mustKeepHand;
+    // 촬영 구간에서는 한 단계 더 세게 말한다. 동작 확인이 끝나서 다 끝난
+    // 줄 알고 손을 내리는 자리가 여기다.
+    final bool capturing = flow.phase == SessionPhase.recording ||
+        flow.phase == SessionPhase.uploading;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -535,16 +539,20 @@ class _KeepHandBanner extends ConsumerWidget {
       child: Row(
         children: <Widget>[
           Icon(
-            keeping ? Icons.pan_tool_outlined : Icons.front_hand_outlined,
+            capturing
+                ? Icons.do_not_touch_outlined
+                : (keeping ? Icons.pan_tool_outlined : Icons.front_hand_outlined),
             size: 20,
             color: keeping ? AppColors.ring : AppColors.textSecondary,
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              keeping
-                  ? challengeKeepHandNotice
-                  : '손을 원 안에 올리면 시작합니다',
+              capturing
+                  ? challengeRecordingKeepHandNotice
+                  : (keeping
+                      ? challengeKeepHandNotice
+                      : '손을 원 안에 올리면 시작합니다'),
               style: AppText.body.copyWith(
                 color: keeping ? AppColors.textPrimary : AppColors.textSecondary,
                 fontWeight: keeping ? FontWeight.w600 : FontWeight.w400,

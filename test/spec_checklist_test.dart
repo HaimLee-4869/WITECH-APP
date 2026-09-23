@@ -86,6 +86,59 @@ void main() {
       expect(text, contains('주먹 쥐기'));
     });
 
+    test('마지막 단계 통과는 "끝났다"가 아니라 "손을 그대로 두세요"다', () {
+      // 동작 확인이 끝나면 사용자는 다 끝난 줄 알고 손을 내린다. 실제로는
+      // 여기서 촬영이 시작되고, 손을 내리면 세션이 끊긴다.
+      final Status last = Status(
+        state: ChallengeState.action,
+        stepIndex: 2,
+        currentAction: null,
+        detectedShape: '—',
+        detectedMove: kNoMove,
+        shapeConfidence: 0.0,
+        holdProgress: 1.0,
+        remainingMs: 0,
+        failReason: null,
+        steps: <StepResult>[
+          StepResult('FIST'),
+          StepResult('INDEX'),
+          StepResult('MOVE_LEFT'),
+        ],
+        moveProbe: null,
+        escapeFrom: null,
+        escapeProgress: 1.0,
+        stepResult: StepOutcome.pass,
+        justPassedStep: 2,
+      );
+      expect(challengePrompt(last), challengeHandOffToCaptureNotice);
+      expect(challengePrompt(last), contains('이어서 촬영'));
+    });
+
+    test('중간 단계 통과는 단계 수를 말한다', () {
+      final Status mid = Status(
+        state: ChallengeState.action,
+        stepIndex: 0,
+        currentAction: null,
+        detectedShape: '—',
+        detectedMove: kNoMove,
+        shapeConfidence: 0.0,
+        holdProgress: 1.0,
+        remainingMs: 0,
+        failReason: null,
+        steps: <StepResult>[
+          StepResult('FIST'),
+          StepResult('INDEX'),
+          StepResult('MOVE_LEFT'),
+        ],
+        moveProbe: null,
+        escapeFrom: null,
+        escapeProgress: 1.0,
+        stepResult: StepOutcome.pass,
+        justPassedStep: 0,
+      );
+      expect(challengePrompt(mid), '1단계 완료');
+    });
+
     test('결과 표시 중에는 배지가 말하므로 아래 문구는 조용하다', () {
       expect(challengePrompt(status(stepResult: StepOutcome.fail)), '');
     });
