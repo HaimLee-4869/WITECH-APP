@@ -526,13 +526,15 @@ class _KeepHandBanner extends ConsumerWidget {
     final bool capturing = flow.phase == SessionPhase.recording ||
         flow.phase == SessionPhase.uploading;
 
+    // 주의 문구다. 민트로 두면 "잘 되고 있다"로 읽히고, 빨강으로 두면
+    // 이미 잘못된 줄 안다. 호박색이 "지금 신경 쓸 것"의 자리다.
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: (keeping ? AppColors.ring : AppColors.surfaceAlt)
-            .withValues(alpha: keeping ? 0.18 : 1.0),
+        color: (keeping ? AppColors.timeLeft : AppColors.surfaceAlt)
+            .withValues(alpha: keeping ? 0.16 : 1.0),
         border: Border.all(
-          color: keeping ? AppColors.ring : AppColors.divider,
+          color: keeping ? AppColors.timeLeft : AppColors.divider,
         ),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -543,7 +545,7 @@ class _KeepHandBanner extends ConsumerWidget {
                 ? Icons.do_not_touch_outlined
                 : (keeping ? Icons.pan_tool_outlined : Icons.front_hand_outlined),
             size: 20,
-            color: keeping ? AppColors.ring : AppColors.textSecondary,
+            color: keeping ? AppColors.timeLeft : AppColors.textSecondary,
           ),
           const SizedBox(width: 10),
           Expanded(
