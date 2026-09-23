@@ -305,9 +305,12 @@ class _TimeBar extends ConsumerWidget {
         minHeight: 6,
         backgroundColor: AppColors.surfaceAlt,
         // 관문 대기 중에는 시계가 멈춘다. 색을 바꿔 "멈췄다"를 보여준다.
+        //
+        // 남은 시간은 **파랑**이다. 민트로 두면 초록으로 읽혀서 아직 통과하지도
+        // 않았는데 통과한 것처럼 보인다. 초록은 PASS에만 쓴다.
         color: paused
             ? AppColors.textSecondary
-            : (ratio < 0.3 ? AppColors.danger : AppColors.ring),
+            : (ratio < 0.3 ? AppColors.danger : AppColors.primary),
       ),
     );
   }
