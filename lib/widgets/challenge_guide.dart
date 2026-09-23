@@ -24,12 +24,16 @@ class ChallengeGuide extends StatelessWidget {
   /// 아직 차례가 아닌 단계는 흐리게.
   final bool dimmed;
 
+  /// 펴는 손가락·화살표 색. 단계가 통과했는지에 따라 호출하는 쪽이 정한다.
+  final Color accent;
+
   const ChallengeGuide({
     super.key,
     required this.action,
     required this.config,
     this.size = 120,
     this.dimmed = false,
+    this.accent = AppColors.ring,
   });
 
   bool get _isShape => kShapePatterns.containsKey(action);
@@ -49,6 +53,7 @@ class ChallengeGuide extends StatelessWidget {
           sketch: sketch,
           arrow: _isShape ? null : arrowFor(action),
           opacity: dimmed ? 0.35 : 1.0,
+          accent: accent,
         ),
       ),
     );
@@ -59,11 +64,13 @@ class _GuidePainter extends CustomPainter {
   final ShapeSketch sketch;
   final ({double dx, double dy})? arrow;
   final double opacity;
+  final Color accent;
 
   _GuidePainter({
     required this.sketch,
     required this.arrow,
     required this.opacity,
+    required this.accent,
   });
 
   @override
@@ -81,10 +88,10 @@ class _GuidePainter extends CustomPainter {
       canvas.drawLine(points[b[0]], points[b[1]], bone);
     }
 
-    // 손가락: 펴는 손가락 초록, 접는 손가락 회색.
+    // 손가락: 펴는 손가락은 [accent], 접는 손가락은 회색.
     for (final (int i, String finger) in kFingerNames.indexed) {
       final bool extended = sketch.extended[i];
-      bone.color = (extended ? AppColors.ring : AppColors.textSecondary)
+      bone.color = (extended ? accent : AppColors.textSecondary)
           .withValues(alpha: opacity * (extended ? 1.0 : 0.45));
       for (final List<int> b in sketchFingerBones(finger)) {
         canvas.drawLine(points[b[0]], points[b[1]], bone);
@@ -94,7 +101,7 @@ class _GuidePainter extends CustomPainter {
         canvas.drawCircle(
           points[kFingerJoints[finger]![2]],
           3.5,
-          Paint()..color = AppColors.ring.withValues(alpha: opacity),
+          Paint()..color = accent.withValues(alpha: opacity),
         );
       }
     }
@@ -113,7 +120,7 @@ class _GuidePainter extends CustomPainter {
     final Offset to = center + dir * reach;
 
     final Paint paint = Paint()
-      ..color = AppColors.ring.withValues(alpha: opacity)
+      ..color = accent.withValues(alpha: opacity)
       ..strokeWidth = 4.0
       ..strokeCap = StrokeCap.round
       ..style = PaintingStyle.stroke;
@@ -161,5 +168,8 @@ class _GuidePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_GuidePainter old) =>
-      old.sketch != sketch || old.arrow != arrow || old.opacity != opacity;
+      old.sketch != sketch ||
+      old.arrow != arrow ||
+      old.opacity != opacity ||
+      old.accent != accent;
 }

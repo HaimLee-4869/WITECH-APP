@@ -148,19 +148,24 @@ class _StepIndicator extends ConsumerWidget {
         for (final (int i, String action) in flow.actions.indexed)
           Column(
             children: <Widget>[
+              // 통과한 단계만 민트다. 아직 해야 할 단계는 보라 — 색만 보고도
+              // 몇 개가 남았는지 센다.
               ChallengeGuide(
                 action: action,
                 config: config,
                 size: 64,
                 dimmed: i != flow.stepIndex,
+                accent: i < flow.stepIndex
+                    ? AppColors.ring
+                    : AppColors.progress,
               ),
               const SizedBox(height: 4),
               Text(
                 '${i + 1}',
                 style: AppText.caption.copyWith(
                   color: switch (i.compareTo(flow.stepIndex)) {
-                    < 0 => AppColors.progress, // 통과한 단계
-                    0 => AppColors.ring, // 지금 단계
+                    < 0 => AppColors.ring, // 통과한 단계
+                    0 => AppColors.progress, // 지금 단계
                     _ => AppColors.textSecondary,
                   },
                 ),
@@ -185,26 +190,17 @@ class _CaptureArea extends ConsumerWidget {
 
     return CaptureRing(
       diameter: diameter,
+      // 테두리는 **손을 놓을 자리**를 알려주는 선이다. 진행 상황은 아래 시간
+      // 바와 테두리 아크(보라)가 말하므로, 평소에는 회색으로 조용히 둔다.
+      // 색이 바뀌는 것은 결과가 났을 때뿐이다 — 그래야 그 변화가 눈에 띈다.
       borderColor: switch (flow.phase) {
         SessionPhase.failed || SessionPhase.unavailable => AppColors.danger,
-        SessionPhase.done => AppColors.progress,
-        // 제스처 수집 중에는 촬영 중이라는 뜻으로 민트. 진행률 아크는 보라다.
-        SessionPhase.recording || SessionPhase.uploading => AppColors.ring,
-        // 손을 찾는 중에는 아직 준비가 안 됐다는 뜻으로 회색.
-        // **초록은 PASS 배지에만 쓴다.** 진행 중인 것에 초록을 쓰면 "통과했다"로
-        // 읽혀서, 정작 통과했을 때 보여줄 신호가 남지 않는다. 나머지는 보라.
-        SessionPhase.challenge => switch (flow.status) {
+        SessionPhase.challenge => switch (flow.status?.stepResult) {
+          StepOutcome.pass => AppColors.success,
+          StepOutcome.fail => AppColors.danger,
           null => AppColors.textSecondary,
-          // 결과 표시가 가장 우선이다. 방금 맞았는지 틀렸는지를 먼저 알려준다.
-          final Status s when s.stepResult == StepOutcome.pass =>
-            AppColors.success,
-          final Status s when s.stepResult == StepOutcome.fail =>
-            AppColors.danger,
-          final Status s when s.awaitingHand => AppColors.textSecondary,
-          final Status s when s.preparing => AppColors.progress,
-          _ => AppColors.ring,
         },
-        SessionPhase.idle => AppColors.textSecondary,
+        _ => AppColors.textSecondary,
       },
       // 대기 중에는 손이 얼마나 연속으로 잡혔는지, 판정 중에는 손 모양 유지
       // 진행도를 테두리 아크로 보여준다. 얼마나 더 있어야 하는지 모르면
@@ -306,11 +302,11 @@ class _TimeBar extends ConsumerWidget {
         backgroundColor: AppColors.surfaceAlt,
         // 관문 대기 중에는 시계가 멈춘다. 색을 바꿔 "멈췄다"를 보여준다.
         //
-        // 남은 시간은 **파랑**이다. 민트로 두면 초록으로 읽혀서 아직 통과하지도
-        // 않았는데 통과한 것처럼 보인다. 초록은 PASS에만 쓴다.
+        // 남은 시간은 **호박색**이다. 민트도 파랑도 "됐다"로 읽힌다.
+        // 초록 계열은 PASS에만 쓴다.
         color: paused
             ? AppColors.textSecondary
-            : (ratio < 0.3 ? AppColors.danger : AppColors.primary),
+            : (ratio < 0.3 ? AppColors.danger : AppColors.timeLeft),
       ),
     );
   }

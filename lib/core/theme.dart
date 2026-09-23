@@ -19,6 +19,11 @@ class AppColors {
   /// 초록으로 두면 차오르는 아크가 "정답/통과"로 읽히는데, 실제로는 그냥
   /// 촬영이 얼마나 진행됐는지일 뿐이다.
   static const progress = Color(0xFF9B6BF2); // 보라
+  /// 남은 시간 바 전용.
+  ///
+  /// 초록·민트·파랑은 전부 "됐다"로 읽힌다. 아직 판정 중인데 통과한 것처럼
+  /// 보이면 안 된다. 시간이 흐르고 있다는 뜻의 호박색을 쓴다.
+  static const timeLeft = Color(0xFFF5A524);
   static const success = Color(0xFF34D399);
   static const danger = Color(0xFFEF4444);
   static const textPrimary = Color(0xFFFFFFFF);
