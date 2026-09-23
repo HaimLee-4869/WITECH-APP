@@ -159,7 +159,7 @@ class _StepIndicator extends ConsumerWidget {
                 '${i + 1}',
                 style: AppText.caption.copyWith(
                   color: switch (i.compareTo(flow.stepIndex)) {
-                    < 0 => AppColors.success, // 통과한 단계
+                    < 0 => AppColors.progress, // 통과한 단계
                     0 => AppColors.ring, // 지금 단계
                     _ => AppColors.textSecondary,
                   },
@@ -187,11 +187,12 @@ class _CaptureArea extends ConsumerWidget {
       diameter: diameter,
       borderColor: switch (flow.phase) {
         SessionPhase.failed || SessionPhase.unavailable => AppColors.danger,
-        SessionPhase.done => AppColors.success,
+        SessionPhase.done => AppColors.progress,
         // 제스처 수집 중에는 촬영 중이라는 뜻으로 민트. 진행률 아크는 보라다.
         SessionPhase.recording || SessionPhase.uploading => AppColors.ring,
-        // 손을 찾는 중에는 아직 준비가 안 됐다는 뜻으로 회색 (인증 화면과 같다)
-        // 준비 시간에는 방금 단계를 통과했다는 신호로 초록.
+        // 손을 찾는 중에는 아직 준비가 안 됐다는 뜻으로 회색.
+        // **초록은 PASS 배지에만 쓴다.** 진행 중인 것에 초록을 쓰면 "통과했다"로
+        // 읽혀서, 정작 통과했을 때 보여줄 신호가 남지 않는다. 나머지는 보라.
         SessionPhase.challenge => switch (flow.status) {
           null => AppColors.textSecondary,
           // 결과 표시가 가장 우선이다. 방금 맞았는지 틀렸는지를 먼저 알려준다.
@@ -200,7 +201,7 @@ class _CaptureArea extends ConsumerWidget {
           final Status s when s.stepResult == StepOutcome.fail =>
             AppColors.danger,
           final Status s when s.awaitingHand => AppColors.textSecondary,
-          final Status s when s.preparing => AppColors.success,
+          final Status s when s.preparing => AppColors.progress,
           _ => AppColors.ring,
         },
         SessionPhase.idle => AppColors.textSecondary,
@@ -328,7 +329,7 @@ class _Prompt extends ConsumerWidget {
           challengeFailMessage(flow.status?.failReason),
           AppColors.danger,
         ),
-      SessionPhase.done => ('인증 요청을 보냈습니다', AppColors.success),
+      SessionPhase.done => ('인증 요청을 보냈습니다', AppColors.progress),
       SessionPhase.idle => ('준비 중입니다…', AppColors.textSecondary),
       // 여기서 손을 내리면 세션이 끊긴다. 계속 붙잡아 둬야 한다.
       SessionPhase.recording => (
@@ -344,7 +345,7 @@ class _Prompt extends ConsumerWidget {
                   (flow.status?.awaitingHand ?? true)
               ? AppColors.textSecondary
               : ((flow.status?.preparing ?? false)
-                  ? AppColors.success // "N단계 완료"는 성공 색으로
+                  ? AppColors.progress // 단계 완료는 진행 색으로
                   : AppColors.textPrimary),
         ),
     };
