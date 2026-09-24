@@ -83,6 +83,8 @@ pytest                                      # 테스트마다 임시 SQLite
 | `enrollmentGestures` | 1 | 등록할 제스처 수. ⚠️ AI팀 확인 대기 (1 또는 5) |
 | `captureDurationMs` | 4000 | 앱 촬영 시간. ⚠️ 바꾸면 기존 등록이 무효다 (9장) |
 | `handRequired` | `right` | 앱 안내용 |
+| `postAuthUrl` | `https://www.naver.com` | 인증 성공 화면의 "계속하기"가 외부 브라우저로 여는 주소. **https만 받는다**(아니면 422) |
+| `challenge` | `app/default_challenge_config.json` | 안티스푸핑 Challenge 판정값 묶음 (6.5장) |
 | `activeModelVersion` | 로드된 인코더 버전 | 재색인이 바꾼다. 직접 수정 금지 |
 
 ```bash
@@ -97,7 +99,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 |---|---|---|
 | POST | `/verify` | 인증 |
 | POST | `/enroll` | 제스처 등록 (take 전부 한 번에) |
-| GET | `/config` | 앱 등록 화면 구성값 |
+| GET | `/config` | 앱 구성값 (등록 화면, 인증 후 이동 주소, Challenge 판정값) |
 | GET | `/users` | 사용자 목록 (활성 모델 기준 등록된 제스처 포함) |
 | POST | `/users` | 사용자 생성 `{id?, name, department?}`. id 생략 시 `u_xxxxxxxx` |
 | DELETE | `/users/{id}` | 사용자와 관련 데이터 **전부** 삭제 (랜드마크 원본 포함) |
@@ -308,9 +310,36 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
   "enrollmentGestures": 1,
   "captureDurationMs": 4000,
   "handRequired": "right",
-  "modelVersion": "shared-dual-head-v1.1.0"
+  "modelVersion": "shared-dual-head-v1.1.0",
+  "postAuthUrl": "https://www.naver.com",
+  "challenge": {
+    "ruleVersion": "2026-09-16.opposite-first-fails",
+    "timing": {
+      "perActionTimeoutMs": 2000,
+      "totalTimeoutMs": 6000,
+      "maxRetries": 1,
+      "waitHandReadyMs": 400,
+      "waitHandTimeoutMs": 15000,
+      "stepPrepareMs": 1500,
+      "stepResultHoldMs": 1500
+    },
+    "...": "판정 임계값 전체는 app/default_challenge_config.json"
+  }
 }
 ```
+
+- `postAuthUrl` — 인증 성공 후 "계속하기"로 여는 주소. 앱도 https인지 다시 확인하고,
+  비어 있으면 버튼을 숨긴다.
+- `challenge` — 안티스푸핑 판정값 전부. **앱은 이 블록을 못 받으면 Challenge를 시작하지 않는다.**
+  화면 흐름에 쓰는 시간 값은 `timing`에 있다.
+
+| `timing` 키 | 기본값 | 뜻 |
+|---|---|---|
+| `waitHandReadyMs` | 400 | 손이 이만큼 연속으로 잡히면 1단계를 시작한다 |
+| `waitHandTimeoutMs` | 15000 | 손을 기다리는 최대 시간(안전장치). 넘으면 `HAND_NOT_FOUND` |
+| `stepResultHoldMs` | 1500 | 단계마다 PASS/FAIL을 보여주는 시간. 이 동안 제한 시간이 흐르지 않는다 |
+| `stepPrepareMs` | 1500 | 다음 동작을 준비하는 시간. 이 동안 제한 시간이 흐르지 않는다 |
+| `perActionTimeoutMs` / `totalTimeoutMs` | 2000 / 6000 | 단계별 / 전체 판정 제한 시간 |
 
 ### 4.5 관리자 화면
 
