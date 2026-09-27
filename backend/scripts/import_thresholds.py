@@ -26,13 +26,22 @@ DEFAULT_SOURCE = BACKEND_DIR / "ai" / "thresholds.json"
 TARGET = BACKEND_DIR / "app" / "default_thresholds.json"
 
 
-def convert(source: dict) -> dict:
+def convert(source: dict, release: str | None = None) -> dict:
     """AI 릴리스 thresholds.json → 백엔드 시드 형식.
 
     dual-head는 운영점 하나가 user/gesture 두 임계값을 갖는다. 백엔드는 이를
     두 행(gate=user, gate=gesture)으로 저장하고 basis로 묶어 전환한다.
     """
     operating_points = source.get("operating_points")
+    if operating_points is None and "user_threshold" in source and "gesture_threshold" in source:
+        # v1.0.0 mobile은 운영점 목록 없이 한 쌍만 준다. default 하나로 옮긴다.
+        operating_points = {
+            "default": {
+                "user_threshold": source["user_threshold"],
+                "gesture_threshold": source["gesture_threshold"],
+                "source": source.get("scheme"),
+            }
+        }
     if not isinstance(operating_points, dict) or not operating_points:
         raise SystemExit("operating_points가 없습니다. 릴리스 형식을 확인하세요.")
 
@@ -53,12 +62,13 @@ def convert(source: dict) -> dict:
             }
         )
     selected = source.get("selected_operating_point", points[0]["basis"])
+    release = release or source.get("release")
     return {
         "source": (
-            f"ai_release/thresholds.json ({source.get('release')}), "
-            f"규칙={source.get('decision_rule')}"
+            f"ai_release/thresholds.json ({release}), "
+            f"규칙={source.get('decision_rule') or source.get('final_rule')}"
         ),
-        "modelVersion": source.get("release"),
+        "modelVersion": release,
         "scheme": "global",
         "defaultBasis": selected,
         "operatingPoints": points,
@@ -73,7 +83,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     source = json.loads(Path(args.file).read_text(encoding="utf-8"))
-    converted = convert(source)
+    # v1.0.0 mobile의 thresholds.json에는 버전이 없다. 같은 폴더 manifest.json에서 읽는다.
+    manifest = Path(args.file).with_name("manifest.json")
+    release = None
+    if manifest.exists():
+        release = json.loads(manifest.read_text(encoding="utf-8")).get("model_version")
+    converted = convert(source, release)
     text = json.dumps(converted, ensure_ascii=False, indent=2) + "\n"
     if args.dry_run:
         print(text)
