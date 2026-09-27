@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import httpx
 import pytest
 
-from tests.conftest import post_json
+from tests.conftest import RELAXED, TU_DEFAULT, TU_RELAXED, add_operating_point, post_json
 from tests.payloads import enroll_same_body, verify_body
 
 USERS = [f"user{i}" for i in range(6)]
@@ -46,7 +46,8 @@ def test_parallel_enroll_and_verify_mixed(client):
     assert len(client.get("/users").json()) == 6
 
 
-def test_parallel_verify_during_threshold_switch(client):
+def test_parallel_verify_during_threshold_switch(client, db):
+    add_operating_point(db)
     gesture = GESTURE
     client.post("/users", json={"id": "kim", "name": "김길동"})
     post_json(client, "/enroll", enroll_same_body("kim", gesture, 0))
@@ -54,7 +55,7 @@ def test_parallel_verify_during_threshold_switch(client):
     def work(i):
         if i % 5 == 0:
             return client.post(
-            "/admin/threshold", json={"basis": ["demo_relaxed", "default"][i % 2]}
+            "/admin/threshold", json={"basis": [RELAXED, "default"][i % 2]}
         )
         return post_json(client, "/verify", verify_body("kim", 0, gesture_id=GESTURE))
 
@@ -62,7 +63,7 @@ def test_parallel_verify_during_threshold_switch(client):
         results = list(pool.map(work, range(40)))
     assert all(r.status_code == 200 for r in results)
     thresholds = {r.json()["threshold"] for r in results if "score" in r.json()}
-    assert thresholds <= {0.3423501253128052, 0.2933087944984436}
+    assert thresholds <= {TU_DEFAULT, TU_RELAXED}
     assert client.get("/logs").json()["total"] == 32
 
 

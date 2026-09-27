@@ -21,19 +21,21 @@ def test_verify_ai_release_passes():
     assert out.stdout.count("[PASS]") >= 18
     assert "[WARN] 사유 코드" not in out.stdout      # 사유 코드 추정 불일치 없음
     assert "shared-dual-head" in out.stdout          # 교체된 실제 릴리스
-    assert "manifest 무결성" in out.stdout
+    assert "manifest 무결성" in out.stdout            # 해시가 없으면 WARN으로라도 알린다
+    assert "[PASS] duration = 촬영 길이" in out.stdout
 
 
 def test_verify_ai_release_detects_broken_module(tmp_path):
-    """norm이 1이 아닌 인코더를 넣으면 FAIL로 잡는다."""
+    """user head norm이 1이 아닌 인코더를 넣으면 FAIL로 잡는다."""
     pkg = tmp_path / "brokenai"
     pkg.mkdir()
     (pkg / "__init__.py").write_text("")
     (pkg / "encoder.py").write_text(
         "from ai.encoder import *  # noqa\n"
-        "from ai.encoder import embed_user as _embed_user\n"
-        "def embed_user(payload):\n"
-        "    return _embed_user(payload) * 2   # L2 norm이 2가 된다\n",
+        "from ai.encoder import embed as _embed\n"
+        "def embed(payload):\n"
+        "    gesture, user = _embed(payload)\n"
+        "    return gesture, user * 2   # user L2 norm이 2가 된다\n",
         encoding="utf-8",
     )
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONPATH": str(tmp_path)}
@@ -42,4 +44,4 @@ def test_verify_ai_release_detects_broken_module(tmp_path):
         cwd=BACKEND_DIR, capture_output=True, text=True, encoding="utf-8", env=env,
     )
     assert out.returncode == 1, out.stdout + out.stderr
-    assert "[FAIL] embed_user: (128,) float32, L2 norm=1" in out.stdout
+    assert "[FAIL] user head embed()[1]: (128,) float32, L2 norm=1" in out.stdout

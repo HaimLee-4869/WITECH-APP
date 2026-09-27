@@ -165,8 +165,8 @@ def test_health(client):
         "status": "ok",
         "modelVersion": encoder.MODEL_VERSION,
         "loadedModelVersion": encoder.MODEL_VERSION,
-        "activeThreshold": 0.3423501253128052,          # Tu
-        "activeGestureThreshold": 0.9020317792892456,   # Tg
+        "activeThreshold": 0.824398994,          # Tu
+        "activeGestureThreshold": 0.937420845,   # Tg
         "activeThresholdBasis": "default",
         "dbOk": True,
     }

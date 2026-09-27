@@ -1,4 +1,4 @@
-"""입력 거절 6종 → 422 + 사유 코드 (명세 1장, 10장)."""
+"""입력 거절 → 422 + 사유 코드 (명세 1장, 10장)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 
 from app.services.ai_gateway import REASON_MESSAGES, reason_of
 from tests.conftest import post_json
-from tests.payloads import enroll_body, left_hand, make_frames
+from tests.payloads import enroll_body, make_frames
 
 
 def _no_hand(frames, count):
@@ -17,6 +17,12 @@ def _no_hand(frames, count):
 
 def _dup_timestamp(frames):
     frames[5]["tMs"] = frames[4]["tMs"]
+    return frames
+
+
+def _swapped_timestamps(frames):
+    # AI 모듈은 tMs를 정렬해 받아버린다. 백엔드(ai_gateway.check_sequence)가 막는다.
+    frames[5], frames[6] = frames[6], frames[5]
     return frames
 
 
@@ -41,13 +47,12 @@ CASES = [
     ("insufficient_valid_frames", lambda: _no_hand(make_frames(0, n=12), 5), None),
     ("duration_too_short", lambda: make_frames(0, n=20, span_ms=700), None),
     ("non_monotonic_timestamps", lambda: _dup_timestamp(make_frames(0)), None),
+    ("non_monotonic_timestamps", lambda: _swapped_timestamps(make_frames(0)), None),
     ("missing_camera_size", lambda: make_frames(0), "drop"),
     ("missing_camera_size", lambda: make_frames(0), {"width": 720}),
     ("malformed_landmarks", lambda: _short_landmarks(make_frames(0)), None),
     ("malformed_landmarks", lambda: _nan(make_frames(0)), None),
     ("malformed_landmarks", lambda: _inf(make_frames(0)), None),
-    # 명세 1장에는 없지만 hand-only 모델이 거절한다 (앱은 오른손 안내를 띄운다)
-    ("wrong_hand", lambda: left_hand(make_frames(0)), None),
 ]
 IDS = [f"{reason}-{i}" for i, (reason, _, _) in enumerate(CASES)]
 

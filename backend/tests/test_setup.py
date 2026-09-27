@@ -49,12 +49,10 @@ def test_startup_seeds_gestures_thresholds_config(client):
     with client.app.state.db.session() as s:
         assert s.scalars(select(models.Gesture.id)).all() == ["G1", "G2", "G3", "G4", "G5"]
         rows = s.scalars(select(models.Threshold)).all()
-        # dual-head: 운영점 2개 × 관문 2개 = 4행
+        # dual-head: 운영점 1개(릴리스 default) × 관문 2개 = 2행
         assert {(r.basis, r.gate, r.value, r.is_active) for r in rows} == {
-            ("default", "user", 0.3423501253128052, True),
-            ("default", "gesture", 0.9020317792892456, True),
-            ("demo_relaxed", "user", 0.2933087944984436, False),
-            ("demo_relaxed", "gesture", 0.9020317792892456, False),
+            ("default", "user", 0.824398994, True),
+            ("default", "gesture", 0.937420845, True),
         }
         assert all(r.scheme == "global" and r.gesture_id is None for r in rows)
         assert cfg.get_active_model_version(s) == encoder.MODEL_VERSION
@@ -72,4 +70,4 @@ def test_startup_seed_is_idempotent(settings):
     for _ in range(2):
         with TestClient(create_app(settings)) as c:
             with c.app.state.db.session() as s:
-                assert len(s.scalars(select(models.Threshold)).all()) == 4
+                assert len(s.scalars(select(models.Threshold)).all()) == 2

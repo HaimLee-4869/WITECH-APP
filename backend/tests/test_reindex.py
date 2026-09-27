@@ -17,11 +17,11 @@ from app import models
 from app.main import create_app
 from app.schemas import SequencePayload
 from app.services import template_service
-from app.services.ai_gateway import to_ai_input
+from app.services.ai_gateway import embed_both_batch, to_ai_input
 from tests.conftest import post_json
 from tests.payloads import enroll_body, enroll_same_body, verify_body
 
-OLD, NEW = encoder.MODEL_VERSION, "shared-dual-head-v1.2.0"
+OLD, NEW = encoder.MODEL_VERSION, "witeck-mobile-shared-dual-head-g1g24-v9.9.9"
 GESTURE, SECOND_GESTURE = "G3", "G5"
 
 
@@ -31,8 +31,8 @@ def _swap_encoder(monkeypatch, fail_on=None):
     제스처 모델은 그대로 둔다. fail_on: 이 camera width를 가진 입력에서 실패.
     """
     rotation = np.linalg.qr(np.random.default_rng(99).normal(size=(128, 128)))[0].astype(np.float32)
-    original_both = encoder.embed_both
-    original_both_batch = encoder.embed_both_batch
+    original_embed = encoder.embed
+    original_embed_batch = encoder.embed_batch
 
     def rotate(vectors):
         out = np.atleast_2d(vectors) @ rotation.T
@@ -43,27 +43,22 @@ def _swap_encoder(monkeypatch, fail_on=None):
         if fail_on is not None and payload.get("width") == fail_on:
             raise RuntimeError("weights corrupted")
 
-    def new_both(payload):
+    # 모듈 계약대로 (gesture, user) 순서로 돌려준다
+    def new_embed(payload):
         check(payload)
-        result = original_both(payload)
-        return {
-            "user_embedding": rotate(result["user_embedding"])[0],
-            "gesture_embedding": rotate(result["gesture_embedding"])[0],
-        }
+        gesture, user = original_embed(payload)
+        return rotate(gesture)[0], rotate(user)[0]
 
-    def new_both_batch(payloads):
+    def new_embed_batch(payloads):
         for payload in payloads:
             check(payload)
-        result = original_both_batch(payloads)
-        return {
-            "user_embeddings": rotate(result["user_embeddings"]),
-            "gesture_embeddings": rotate(result["gesture_embeddings"]),
-        }
+        gestures, users = original_embed_batch(payloads)
+        return rotate(gestures), rotate(users)
 
     monkeypatch.setattr(encoder, "MODEL_VERSION", NEW)
     # 실제 모듈의 batch는 단건을 호출하지 않으므로 둘 다 바꾼다
-    monkeypatch.setattr(encoder, "embed_both", new_both)
-    monkeypatch.setattr(encoder, "embed_both_batch", new_both_batch)
+    monkeypatch.setattr(encoder, "embed", new_embed)
+    monkeypatch.setattr(encoder, "embed_batch", new_embed_batch)
 
 
 def _enroll_users(client):
@@ -156,10 +151,11 @@ def test_reindex_new_centroid_matches_new_space(settings, monkeypatch):
         inputs = []
         for r in group:
             p = SequencePayload.model_validate(json.loads(r.landmarks_json))
-            inputs.append(to_ai_input(p.camera, p.frames))
-        expected = template_service.build_centroid(
-            encoder.embed_both_batch(inputs)["user_embeddings"]
-        )
+            inputs.append(
+                to_ai_input(p.camera, p.frames, nominal_fps=p.nominal_fps, duration_ms=p.duration_ms)
+            )
+        users, _ = embed_both_batch(inputs)
+        expected = template_service.build_centroid(users)
         assert np.allclose(new, expected, atol=1e-6)
         assert not np.allclose(new, old, atol=1e-3)
 
@@ -195,7 +191,7 @@ def test_failed_same_version_reindex_keeps_auth_working(client, db, monkeypatch)
     gesture = _enroll_users(client)
     before = _snapshot(db)
     calls = {"n": 0}
-    original = encoder.embed_both_batch
+    original = encoder.embed_batch
 
     def flaky(items):
         calls["n"] += 1
@@ -203,9 +199,9 @@ def test_failed_same_version_reindex_keeps_auth_working(client, db, monkeypatch)
             raise RuntimeError("OOM")
         return original(items)
 
-    monkeypatch.setattr(encoder, "embed_both_batch", flaky)
+    monkeypatch.setattr(encoder, "embed_batch", flaky)
     monkeypatch.setattr(
-        encoder, "embed_both", lambda f: (_ for _ in ()).throw(RuntimeError("OOM"))
+        encoder, "embed", lambda f: (_ for _ in ()).throw(RuntimeError("OOM"))
     )
     res = client.post("/admin/reindex", json={"modelVersion": OLD}).json()
     assert res["failed"] > 0 and res["switched"] is False

@@ -18,13 +18,13 @@ from sqlalchemy import select
 from ai import encoder
 from app import models
 from app.services import app_config_service as cfg
-from tests.conftest import post_json
+from tests.conftest import TG_DEFAULT, TU_DEFAULT, post_json
 from tests.payloads import enroll_same_body, other_gesture, verify_body
 
 GESTURE = "G3"          # 앱이 보내는 gestureId
 UNRELATED_SEED = 1      # seed 0 등록분과 무관한 입력
-TU = 0.3423501253128052
-TG = 0.9020317792892456
+TU = TU_DEFAULT
+TG = TG_DEFAULT
 
 
 def _logs(db):
@@ -185,7 +185,7 @@ def test_each_request_logs_one_summary_line(client, enrolled, caplog):
     assert "status=200" in lines[0] and "passed=True" in lines[0] and "reason=-" in lines[0]
     assert "score=1.0000" in lines[0] and "threshold=0." in lines[0]
     # 두 관문 값이 모두 한 줄에 남는다.
-    assert "gestureScore=1.0000" in lines[0] and "gestureThreshold=0.9020" in lines[0]
+    assert "gestureScore=1.0000" in lines[0] and "gestureThreshold=0.9374" in lines[0]
     assert "passed=False" in lines[1]
     assert "status=422" in lines[2] and "frames=3" in lines[2] and "score=-" in lines[2]
     assert not any("[" in l for l in lines)  # 좌표 본문은 찍지 않는다
@@ -224,3 +224,36 @@ def test_concurrent_verify_is_consistent(client, db, enrolled, make_user):
     }
     assert {d["reason"] for d in lee} == {"no_template"}
     assert len(_logs(db)) == 24
+
+
+def test_capture_length_reaches_ai_module(client, make_user, monkeypatch):
+    """/enroll·/verify의 nominalFps·durationMs가 모듈의 fps·totalFrames로 들어간다.
+
+    빠지면 모듈이 fps=30, totalFrames=검출 프레임 수로 채워 duration이 틀린다.
+    """
+    from ai import encoder
+
+    seen = []
+    original_embed, original_batch = encoder.embed, encoder.embed_batch
+
+    def spy_embed(payload):
+        seen.append((payload["fps"], payload["totalFrames"]))
+        return original_embed(payload)
+
+    def spy_batch(payloads):
+        seen.extend((p["fps"], p["totalFrames"]) for p in payloads)
+        return original_batch(payloads)
+
+    monkeypatch.setattr(encoder, "embed", spy_embed)
+    monkeypatch.setattr(encoder, "embed_batch", spy_batch)
+
+    make_user()
+    body = enroll_same_body(gesture_id="G1")
+    for take in body["takes"]:
+        take["durationMs"] = 3000   # 프레임은 2초 분량(40개)만 있다
+    assert post_json(client, "/enroll", body).status_code == 200
+    assert seen == [(30.0, 90)] * 3
+
+    seen.clear()
+    assert post_json(client, "/verify", verify_body(gesture_id="G1", durationMs=3000)).status_code == 200
+    assert seen == [(30.0, 90)]

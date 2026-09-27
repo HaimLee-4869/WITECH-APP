@@ -49,3 +49,27 @@ def make_user(db):
 def post_json(client: TestClient, url: str, body: dict):
     """NaN을 그대로 보내기 위해 직접 직렬화한다 (httpx json=은 NaN을 거부)."""
     return client.post(url, content=json.dumps(body), headers={"Content-Type": "application/json"})
+
+
+# 릴리스 thresholds.json의 default 운영점 (app/default_thresholds.json)
+TU_DEFAULT, TG_DEFAULT = 0.824398994, 0.937420845
+# 전환 테스트용 두 번째 운영점. v1.0.0 mobile 릴리스는 운영점을 하나만 주므로
+# 전환 기능을 검증하려면 테스트가 직접 넣는다. 값 자체에는 의미가 없다.
+RELAXED, TU_RELAXED, TG_RELAXED = "test_relaxed", 0.5, 0.9
+
+
+def add_operating_point(db, basis: str = RELAXED, user: float = TU_RELAXED,
+                        gesture: float = TG_RELAXED) -> None:
+    """로드된 인코더 버전에 비활성 운영점(user/gesture 두 행)을 추가한다."""
+    from ai import encoder
+
+    with db.session() as s:
+        for gate, value in (("user", user), ("gesture", gesture)):
+            s.add(
+                models.Threshold(
+                    scheme="global", gate=gate, gesture_id=None,
+                    model_version=encoder.MODEL_VERSION, value=value,
+                    basis=basis, is_active=False,
+                )
+            )
+        s.commit()
