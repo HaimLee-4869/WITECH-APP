@@ -165,7 +165,12 @@ def _verify(session: Session, settings: Settings, req: VerifyRequest, a: _Attemp
 
     # 2. 검증 겸 임베딩
     try:
-        user_embedding, gesture_embedding = embed_both(to_ai_input(req.camera, req.frames))
+        user_embedding, gesture_embedding = embed_both(
+            to_ai_input(
+                req.camera, req.frames,
+                nominal_fps=req.nominal_fps, duration_ms=req.duration_ms,
+            )
+        )
     except InvalidSequenceError as exc:
         fail(INVALID_INPUT)
         _write_log(session, a, active_version, a.latency_ms())

@@ -48,6 +48,9 @@ class SequencePayload(CamelModel):
 
     camera: Camera | None = None
     frames: list[Frame] = Field(default_factory=list)
+    # AI 모듈의 duration(totalFrames / fps) 입력. 재색인이 저장된 원본에서 다시 읽는다.
+    nominal_fps: float | None = None
+    duration_ms: int | None = None
 
 
 # --- /verify --------------------------------------------------------------------
@@ -60,8 +63,6 @@ class VerifyRequest(SequencePayload):
     user_id: UserId
     gesture_id: GestureId | None = None
     captured_at: datetime | None = None
-    nominal_fps: float | None = None
-    duration_ms: int | None = None
 
 
 class VerifyResponse(ResponseModel):

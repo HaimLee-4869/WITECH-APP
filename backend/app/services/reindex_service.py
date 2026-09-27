@@ -28,7 +28,7 @@ from app.models import Embedding, Enrollment
 from app.schemas import ReindexFailure, ReindexRequest, ReindexResponse, SequencePayload
 from app.services import app_config_service as cfg
 from app.services import template_service, threshold_service
-from app.services.ai_gateway import embed_both_batch, to_ai_input
+from app.services.ai_gateway import embed_both, embed_both_batch, to_ai_input
 
 log = logging.getLogger(__name__)
 
@@ -59,7 +59,12 @@ def _embed_group(
     for row in rows:
         try:
             payload = SequencePayload.model_validate(json.loads(row.landmarks_json))
-            inputs.append(to_ai_input(payload.camera, payload.frames))
+            inputs.append(
+                to_ai_input(
+                    payload.camera, payload.frames,
+                    nominal_fps=payload.nominal_fps, duration_ms=payload.duration_ms,
+                )
+            )
         except Exception as exc:  # 저장된 원본이 깨진 경우
             failures.append(_failure(row, f"stored payload unreadable: {exc}"))
     if failures:
@@ -79,7 +84,7 @@ def _embed_group(
         # 어느 건이 문제인지 하나씩 찾는다
         for row, item in zip(rows, inputs):
             try:
-                encoder.embed_both(item)
+                embed_both(item)
             except Exception as exc:
                 failures.append(_failure(row, exc))
         if not failures:

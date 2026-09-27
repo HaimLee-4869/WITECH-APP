@@ -26,6 +26,7 @@ from app.services import app_config_service as cfg
 from app.services import template_service
 from app.services.ai_gateway import (
     InvalidSequenceError,
+    embed_both,
     embed_both_batch,
     invalid_sequence_error,
     to_ai_input,
@@ -50,7 +51,7 @@ def _embed_all(inputs: list[dict], take_nos: list[int]) -> tuple[np.ndarray, np.
         # 어느 take가 문제인지 찾아 앱에 알려준다
         for take_no, item in zip(take_nos, inputs):
             try:
-                encoder.embed_both(item)
+                embed_both(item)
             except InvalidSequenceError as take_exc:
                 raise invalid_sequence_error(take_exc, take_no=take_no) from exc
         raise invalid_sequence_error(exc) from exc
@@ -75,7 +76,10 @@ def enroll(session: Session, req: EnrollRequest, raw_body: dict) -> EnrollRespon
 
     takes = sorted(req.takes, key=lambda t: t.take_no)
     raw_takes = {int(t["takeNo"]): t for t in raw_body["takes"]}
-    inputs = [to_ai_input(req.camera, t.frames) for t in takes]
+    inputs = [
+        to_ai_input(req.camera, t.frames, nominal_fps=t.nominal_fps, duration_ms=t.duration_ms)
+        for t in takes
+    ]
 
     # 1, 3. 검증 겸 임베딩. 여기서 실패하면 DB는 건드리지 않았다.
     user_vectors, gesture_vectors = _embed_all(inputs, [t.take_no for t in takes])
