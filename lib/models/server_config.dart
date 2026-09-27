@@ -97,7 +97,10 @@ class ServerConfig {
   /// https만 연다. 다른 스킴은 외부 브라우저에서 무엇이 열릴지 알 수 없다.
   bool get hasPostAuthUrl => postAuthUrl.startsWith('https://');
 
-  /// 오른손만 허용하는지. 화면 안내 문구를 띄울지 결정한다.
+  /// 오른손 사용을 안내해야 하는지. 화면 안내 문구를 띄울지 결정한다.
+  ///
+  /// 안내용 값이다. 서버는 왼손 캡처를 거절하지 않는다(2026-09-27 모델부터 AI 모듈이
+  /// handedness가 Left면 오른손으로 반전해 받고, 앱은 handedness를 보내지 않는다).
   bool get requiresRightHand => handRequired == 'right';
 
   Duration get captureDuration => Duration(milliseconds: captureDurationMs);

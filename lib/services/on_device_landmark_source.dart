@@ -264,9 +264,10 @@ class OnDeviceLandmarkSource implements LandmarkSource {
         for (final lm in hand.landmarks) Landmark(lm.x, lm.y, lm.z),
       ],
       // hand_landmarker 3.0.1의 Hand는 좌/우를 주지 않는다. 모르는 값을 'Right'로
-      // 채워 보내면 실제 왼손을 오른손으로 위장하게 되므로(AI 릴리스 README 금지)
+      // 채워 보내면 실제 왼손을 오른손으로 위장하게 되므로(이전 AI 릴리스 README 금지)
       // 아예 보내지 않는다. 대신 화면에서 오른손 사용을 안내한다.
-      // 플러그인이 handedness를 주게 되면 여기서 그대로 실으면 된다.
+      // 플러그인이 handedness를 주게 되면 여기서 그대로 실으면 된다. 그러면 AI 모듈이
+      // 왼손을 오른손으로 좌우 반전해 받는다(서버가 거절하지는 않는다).
       handedness: null,
       // 이 플러그인은 신뢰도도 돌려주지 않는다. 다만 minHandDetectionConfidence
       // 미만은 걸러내므로 그 임계값을 하한으로 기록한다.

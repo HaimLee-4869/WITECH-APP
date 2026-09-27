@@ -179,7 +179,7 @@ flutter run --dart-define=SIGNID_API_BASE=http://192.168.0.10:8000
 
 ```bash
 flutter test test/live_backend_test.dart \
-  --dart-define=SIGNID_LIVE_TEST=1 \
+  --dart-define=SIGNID_LIVE_TEST=true \
   --dart-define=SIGNID_API_BASE=http://127.0.0.1:8000
 ```
 

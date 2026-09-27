@@ -82,6 +82,8 @@ const Set<String> _captureReasons = <String>{
   'duration_too_short',
   'non_monotonic_timestamps',
   'malformed_landmarks',
+  // 2026-09-27 모델부터 서버가 보내지 않는다(왼손을 거절하지 않고 반전해 받는다).
+  // 이전 서버와 붙을 때를 위해 남겨 둔다.
   'wrong_hand',
   'invalid_sequence',
 };
@@ -94,6 +96,7 @@ String? messageForReason(String reason) => _messages[reason];
 
 const Map<String, String> _messages = <String, String>{
   // --- 입력 거절 (code: invalid_sequence) ---
+  // wrong_hand: 이전 서버 전용. 지금 서버는 보내지 않는다 (위 _captureReasons 참고).
   'wrong_hand': '오른손을 사용해주세요. 이 모델은 오른손 동작만 인식합니다.',
   'insufficient_valid_frames': '손이 잘 보이도록 다시 시도해주세요.',
   'duration_too_short': '조금 더 천천히 동작해주세요.',

@@ -216,8 +216,8 @@ void main() {
         body: {
           'detail': {
             'code': 'invalid_sequence',
-            'reason': 'wrong_hand',
-            'message': '오른손을 사용해주세요. 이 모델은 오른손 동작만 인식합니다.',
+            'reason': 'duration_too_short',
+            'message': '동작이 너무 짧습니다. 조금 더 천천히 해주세요.',
           },
         },
       );
@@ -232,13 +232,13 @@ void main() {
             capturedAt: DateTime.utc(2026, 9, 16),
             nominalFps: kNominalFps,
             durationMs: 2000,
-            frames: _frames(handedness: 'Left'),
+            frames: _frames(),
           ),
         ),
         throwsA(
           isA<ApiException>()
-              .having((e) => e.reason, 'reason', 'wrong_hand')
-              .having((e) => e.userMessage, 'userMessage', contains('오른손을 사용해주세요'))
+              .having((e) => e.reason, 'reason', 'duration_too_short')
+              .having((e) => e.userMessage, 'userMessage', '조금 더 천천히 동작해주세요.')
               .having((e) => e.isRetryableCapture, 'isRetryableCapture', isTrue),
         ),
       );
@@ -256,6 +256,7 @@ void main() {
     });
 
     test('사유 코드별 안내 문구가 backend README 5장과 맞는다', () {
+      // wrong_hand는 README 5장에서 빠졌다(지금 서버는 보내지 않는다). 이전 서버용 매핑만 남는다.
       expect(messageForReason('wrong_hand'), contains('오른손을 사용해주세요'));
       expect(messageForReason('insufficient_valid_frames'), '손이 잘 보이도록 다시 시도해주세요.');
       expect(messageForReason('duration_too_short'), '조금 더 천천히 동작해주세요.');
