@@ -1,0 +1,25 @@
+{
+  "release": "shared-dual-head-v1.1.1",
+  "selected_operating_point": "default",
+  "decision_rule": "gesture_score >= gesture_threshold AND user_score >= user_threshold",
+  "operating_points": {
+    "default": {
+      "gesture_threshold": 0.9020317792892456,
+      "user_threshold": 0.3423501253128052,
+      "source": "known-user validation calibration from packaged checkpoint"
+    },
+    "demo_relaxed": {
+      "gesture_threshold": 0.9020317792892456,
+      "user_threshold": 0.2933087944984436,
+      "source": "known-user validation only",
+      "gesture_validation_far": 0.0,
+      "gesture_validation_frr": 0.0,
+      "user_validation_far": 0.047619047619047616,
+      "user_validation_frr": 0.02857142857142857
+    }
+  },
+  "demo_relaxed": {
+    "status": "CALIBRATED",
+    "provenance": "known-user validation only"
+  }
+}
