@@ -6,7 +6,7 @@
 여기 있는 코드는 **어디에서도 import되지 않는다.** 백엔드는 `backend/ai/`만 쓴다.
 비교·되돌리기 용도로만 남겨 둔다.
 
-| | baseline (여기) | 현재 `backend/ai/` |
+| | baseline (여기) | 다음 릴리스 v1.1.1 (지금은 `ai_v1.1.1_baseline/`) |
 |---|---|---|
 | 구조 | 인증 인코더 + 제스처 분류기(2모델) | 공유 인코더 + user/gesture 임베딩 헤드(1모델) |
 | 제스처 판정 | `classify_gesture()` G1~G5 닫힌 집합 | gesture 임베딩 × 템플릿 코사인 (Tg) |

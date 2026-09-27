@@ -13,14 +13,14 @@
 | **Flutter 앱** | `lib/` | 화면 UI, 카메라 프리뷰 + 손 뼈대 오버레이, 랜드마크 수집 |
 | **안티스푸핑 Challenge** | `lib/challenge/` (판정)<br>`challenge_response/` (원본·임계값 도출) | 무작위 동작 3개를 요청하고 규칙 기반 판정. **제스처 인증과 한 번의 촬영으로 이어진다** |
 | **FastAPI 백엔드** | `backend/` | SQLite + Alembic, 등록·인증·이력·운영 API |
-| **AI 인증 모델** | `backend/ai/` | AI팀 릴리스 `shared-dual-head-v1.1.1`. 백엔드가 import해서 쓴다 |
+| **AI 인증 모델** | `backend/ai/` | AI팀 릴리스 `witeck-mobile-shared-dual-head-g1g24-v1.0.0` (2026-09-27 교체). 백엔드가 import해서 쓴다 |
 
 | 아직 없는 것 | 비고 |
 |---|---|
 | 사용자 계정/비밀번호 인증 | 홈에서 사용자를 고르는 것이 신원이다 |
 | `/admin/*` 접근 제어 | 인증이 없다. 외부 노출 금지 |
 | 푸시 알림 | |
-| 개인 제스처(자유 제스처) | 모델은 임베딩 방식이나 체크포인트는 G1~G5로 학습됐다 |
+| 개인 제스처(자유 제스처) | 모델은 임베딩 방식이고 G1~G24로 학습됐으나, 새 사용자 + 자유 제스처 조합은 AI팀도 아직 직접 검증하지 않았다 |
 | Challenge 결과의 서버 검증 | 판정이 앱에서 끝난다. 앱을 조작하면 우회된다 |
 
 ### 문서
@@ -115,7 +115,7 @@ flutter run --release    # 또는 그냥 flutter run (디버그)
 
 ```bash
 flutter analyze   # 경고 0개여야 한다
-flutter test      # 428개 (세션·오버레이·화면 전환 + 안티스푸핑 Challenge)
+flutter test      # 430개 + skip 7 (세션·오버레이·화면 전환 + 안티스푸핑 Challenge)
 ```
 
 테스트는 `kUseFakeLandmarks` 값과 무관하게 항상 가짜 소스를 주입한다
@@ -124,8 +124,8 @@ flutter test      # 428개 (세션·오버레이·화면 전환 + 안티스푸�
 백엔드와 안티스푸핑 원본도 각자 테스트가 있다:
 
 ```bash
-cd backend && pytest                                  # 193개
-cd challenge_response && pytest                       # 236개 (test_guide_overlay는 opencv 필요)
+cd backend && pytest                                  # 204개
+cd challenge_response && pytest                       # 270개 (test_guide_overlay는 opencv 필요)
 ```
 
 `challenge_response`의 `tests/test_dart_golden.py`는 **파이썬 규칙과 Dart 이식본이
@@ -154,7 +154,7 @@ cd challenge_response && pytest                       # 236개 (test_guide_overl
 | `kUseFakeLandmarks` | `false` | `false`면 `OnDeviceLandmarkSource`(실제 카메라 + MediaPipe), `true`면 `FakeLandmarkSource`(사인파 가짜 손). 에뮬레이터에서 돌릴 때만 `true`로 바꾼다 |
 | `kDefaultEnrollTakes` | `3` | 등록 회차 수의 **기본값**. 실제 값은 서버 `GET /config`의 `enrollmentTakes` |
 | `kRecordDuration` | `4000ms` | 캡처 시간의 **기본값**. 실제 값은 서버 `GET /config`의 `captureDurationMs`<br>⚠️ 이 값은 AI 모델의 입력 feature다. 바꾸면 기존 등록이 무효다 |
-| `kNominalFps` | `30` | 카메라 명목 fps. 서버로 보내는 `nominalFps` 값 |
+| `kNominalFps` | `30` | 카메라 명목 fps. 서버로 보내는 `nominalFps` 값. 서버가 `durationMs`와 함께 AI 모델의 촬영 길이 입력을 만든다(아래 "전송 JSON 스키마"). 실제 fps와 달라도 된다 |
 | `kMinFramesForVerify` | `20` | 이보다 적게 모이면 서버로 보내지 않고 재시도를 안내 |
 | `kHandReadyDuration` | `400ms` | 이만큼 연속 검출되면 카운트다운 시작 |
 | `kHandGapTolerance` | `300ms` | 이보다 짧은 공백은 연속이 끊긴 것으로 보지 않는다 |
@@ -435,7 +435,7 @@ done          결과 화면으로 전환
 
 ```json
 {
-  "userId": "eunjung",
+  "userId": "u_1a2b3c4d",
   "gestureId": "G1",
   "camera": { "width": 720, "height": 480 },
   "capturedAt": "2026-09-18T10:39:01+09:00",
@@ -449,6 +449,10 @@ done          결과 화면으로 전환
 }
 ```
 
+- `durationMs`·`nominalFps`는 **기록용이 아니라 모델 입력의 재료다.** 서버가
+  `totalFrames = durationMs × nominalFps / 1000`을 계산해 AI 모델에 넘기고, 모델은
+  `totalFrames / fps` = 촬영 초를 입력으로 쓴다. 실기기는 13~24fps로 흔들리지만 촬영
+  길이(`durationMs`)만 맞으면 된다. 자세한 근거는 아래 "AI 모델 교체와 앱 payload".
 - `handedness`는 **보내지 않는다.** 플러그인이 좌/우를 주지 않는다 (아래 "알려진 제약").
 - `score`는 측정값이 아니라 플러그인 하한값(0.6)이다. "이 값 이상"이라는 뜻이다.
 - `camera`가 없으면 서버가 422 `missing_camera_size`로 거절한다. 종횡비 보정에 필요하다.
@@ -457,6 +461,39 @@ done          결과 화면으로 전환
 등록(`EnrollRequest`)은 같은 프레임 구조를 회차 배열(`takes`)로 감싼 형태다.
 스키마는 `backend/README.md` 4장에 확정돼 있고 `backend/examples/`에 완전한 예시가 있다.
 
+### AI 모델 교체와 앱 payload (2026-09-27)
+
+AI 모델이 `witeck-mobile-shared-dual-head-g1g24-v1.0.0`로 바뀌었다. **앱은 고치지 않았다.** 달라진 입력 요구를
+백엔드(`backend/app/services/ai_gateway.py`)가 이미 오던 값으로 채운다.
+
+AI팀 체크리스트는 "앱이 width, height, FPS, totalFrames를 전달", "검출 프레임이 원래
+frameIndex와 tMs를 유지"를 요구한다. 앱은 `totalFrames`와 프레임별 `frameIndex`를 보내지 않는다.
+실제 모듈(`features.py`)을 읽어 보니:
+
+| 값 | 모듈이 쓰는 곳 | 없을 때 |
+|---|---|---|
+| `fps`, `totalFrames` | `duration = totalFrames / fps`를 **모델 입력**으로 | 에러 없이 fps=30, totalFrames=검출 프레임 수로 채운다 |
+| `frameIndex` | 검출 마스크를 전체 타임라인에 복원 | 목록 순번. 이 체크포인트는 마스크를 입력으로 쓰지 않아 임베딩에 영향 없음 |
+
+즉 빠지면 **조용히 틀린다.** 앱은 손이 검출된 프레임만 보내고 실기기는 30fps보다 느리므로,
+4초 촬영이 "검출 프레임 수 ÷ 30"초로 들어간다. 같은 사람·같은 동작인데 user 점수가 떨어진다.
+
+- 실제 등록 캡처를 절반 프레임(약 15fps)으로 줄여 흉내 내면 duration 4.0초 → 2.0초,
+  원본과의 user 코사인 **0.73** (Tu 0.824 아래). 표본 3건, 참고용.
+- 2026-09-23 실기기 연속 세션의 인증 요청 9건(4초에 46~95프레임)을 새 모델로 다시 계산하면,
+  값을 채웠을 때 9건 모두 통과(user 0.946~0.996), 뺐을 때 **9건 중 7건이 Tu 아래**(user
+  0.537~0.953). 표본 9건·같은 사용자 ID, 참고용.
+
+그래서 서버가 `totalFrames = durationMs × nominalFps / 1000`으로 채운다. 모듈이 쓰는 건 결국
+`totalFrames / fps` = `durationMs / 1000`이라 **실제 fps를 몰라도 촬영 길이만 맞으면 된다.**
+앱이 이미 `durationMs`(녹화 길이)를 보내고 있었으므로 앱 재배포가 필요 없었다. 프레임 번호를
+앱에서 세려면 비동기 검출 결과와 카메라 프레임을 짝지어야 하는데, 모델이 그 값을 쓰지 않아
+얻는 것이 없다. 등록 원본에도 `durationMs`가 남아 있어 재색인으로 기존 등록 9건을 옮겼다.
+
+입력 거절도 한 가지 달라졌다. 새 모듈은 750ms 하한과 `tMs` 순서 검사(정렬 후 중복만 거절)를
+하지 않아서 서버가 앞단(`check_sequence`)에서 막는다. 앱이 받는 사유 코드는 같다. 왼손은 아래
+"알려진 제약"을 볼 것. 모델 교체 절차와 계약은 `backend/README.md` 7장.
+
 ---
 
 ## 알려진 제약
@@ -464,18 +501,20 @@ done          결과 화면으로 전환
 `hand_landmarker` 3.0.1의 `Hand` 클래스는 `landmarks`만 노출하고
 **handedness(좌/우)와 검출 신뢰도(score)를 돌려주지 않는다.** 그래서:
 
-- `handedness` — **보내지 않는다.** 서버는 이 값으로 왼손을 거르지만(422 `wrong_hand`),
-  모르는 값을 `'Right'`로 채우면 실제 왼손 입력을 오른손으로 위장하게 되고
-  AI 릴리스 README가 이를 명시적으로 금지한다. 좌표만으로 좌우를 추정하는 것도
-  손바닥이 뒤집히면 틀린다.
+- `handedness` — **보내지 않는다.** 모르는 값을 `'Right'`로 채우면 실제 왼손 입력을
+  오른손으로 위장하게 되고 AI 릴리스 README가 이를 명시적으로 금지했다. 좌표만으로
+  좌우를 추정하는 것도 손바닥이 뒤집히면 틀린다.
 - `score` — 플러그인에 설정한 `minHandDetectionConfidence`(0.6)를 하한값으로
   기록한다. 플러그인이 그 미만은 걸러내므로 "이 값 이상"은 참이다.
 
-**결과: 왼손으로 인증해도 서버가 걸러내지 못한다.** 현재 방어선은 인증·등록 화면의
-"오른손을 사용해주세요" 안내뿐이다(`HandGuideNotice`, 서버 `handRequired`에 연동).
-정확도가 떨어지는 조용한 실패로 이어지므로, 플러그인이 handedness를 주게 되면
+**왼손은 거절되지도 보정되지도 않는다.** 이전 모델은 `handedness`가 Left면 422
+`wrong_hand`로 거절했지만, 2026-09-27에 바꾼 모델은 거절하지 않고 **오른손으로 좌우를
+뒤집어 받는다.** `wrong_hand`는 더 이상 발생하지 않는다. 그런데 앱은 handedness를 보내지
+않으므로 뒤집히지도 않고, 왼손 입력이 오른손처럼 처리되어 점수만 조용히 떨어진다.
+현재 방어선은 인증·등록 화면의 "오른손을 사용해주세요" 안내다(`HandGuideNotice`,
+서버 `handRequired`에 연동). 플러그인이 handedness를 주게 되면
 `OnDeviceLandmarkSource._toHandFrame()`에서 그 값을 실어 보내고
-`kPluginProvidesHandedness`를 `true`로 바꾼다. 그때부터 서버가 왼손을 거른다.
+`kPluginProvidesHandedness`를 `true`로 바꾼다. 그때부터 모델이 왼손을 오른손으로 맞춰 받는다.
 
 ## 안티스푸핑 Challenge (`lib/challenge/`)
 
@@ -744,7 +783,7 @@ CHALLENGE record done frames=57 scaleJumpMax=1.12 wristJumpMax=0.31 samples=57 g
 | 1단계에는 이탈 관문이 없다 | 시작 시점에 이미 1단계 손 모양이면 그대로 통과된다. 매번 시작 자세를 요구하는 비용이 더 크다고 봤다(challenge_response README 5.7). 2·3단계에는 관문이 있어 정지된 손 하나로 전체를 통과할 수는 없다 |
 | 이동 방향 근거가 좁다 | `directionMap`의 상하는 참가자 1명(P05)의 영상 4개에 기댄다 |
 | `shapeConfidenceMin`이 null | 분포가 겹쳐 도출하지 못했다. 신뢰도 게이트를 끈 채로 간다 |
-| **통과율 미측정** | 실기기에서 3단계를 끝까지 통과한 세션이 **1회(8.5초)** 다. 정상 사용자가 몇 번에 한 번 통과하는지, 어느 단계에서 주로 막히는지는 표본이 없다. `backend/logs/challenge_debug.log`의 `blocked=`·`verdict=`를 세어 보면 나온다 |
+| **통과율 표본이 작다** | 2026-09-23 실기기 연속 세션 17회 중 Challenge 통과 11회, 실패 6회(`SESSION_BROKEN` 4, `HAND_LOST` 1, `HAND_NOT_FOUND` 1). **표본 17회, 참고용** — 여러 사람의 통과율로 말할 수 없다. `backend/logs/challenge_debug.log`의 `blocked=`·`verdict=`를 세어 보면 단계별로 나온다 |
 | 임계값이 거치 조건에서 도출됨 | 파일럿은 폰을 **고정하고** 손만 움직였다. 손에 들면 폰도 따라가 상대 변위가 줄어든다. 실사용 조건에서 다시 재야 한다 |
 
 ## 인증 성공 후 이어지는 서비스
@@ -777,6 +816,23 @@ Challenge 3단계, 제스처 인증, 결과 화면까지 전부 동작한다.
 검증 과정에서 **실기기에서만 드러난 문제**를 여러 번 고쳤다. 다른 기기로 옮길 때
 같은 증상이 나오면 여기부터 볼 것. 공통점이 있다 — 전부 화면 표시 쪽은 멀쩡한데
 판정 입력 쪽이 틀렸거나, 프레임 수로 센 값이 낮은 fps에서 다른 시간이 된 경우다.
+
+**연속 세션: Challenge → 제스처 인증 한 번의 촬영 (2026-09-23)**
+
+한 세션으로 묶은 흐름을 실기기에서 돌렸다. 판정 로그(`challenge_debug.log`)와 인증 이력 기준:
+
+| 항목 | 결과 |
+|---|---|
+| 세션 | 17회 |
+| Challenge 통과 | 11회 |
+| Challenge 실패 | 6회 — `SESSION_BROKEN` 4, `HAND_LOST` 1, `HAND_NOT_FOUND` 1 |
+| 4초 수집 후 서버 전송 | 9회 (통과 11회 중. 나머지 2회는 수집 완료 기록이 없다) |
+| 서버 인증 | 9건 모두 통과 (당시 모델 v1.1.1, 새 모델로 다시 계산해도 9건 통과) |
+| 4초 수집 프레임 수 | 46~95개 (약 11~24fps) |
+
+**표본 17회, 인증 요청은 모두 같은 사용자 ID라 참고용이다.** 흐름이 끝까지 이어진다는 것과
+`SESSION_BROKEN`이 실패 사유 중 가장 많았다는 것까지만 말할 수 있다. 타인 시도는 없다.
+이 세션들은 전환 순간 안내 문구를 바꾸기(2026-09-24, 위 "넘어가는 순간의 안내") **전**이다.
 
 **0. 안티스푸핑 Challenge (2026-09-18)**
 
