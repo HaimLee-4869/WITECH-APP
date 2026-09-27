@@ -1,83 +1,12 @@
 {
-  "release": "shared-dual-head-v1.1.1",
-  "status": "FINALIZED",
-  "created_from_checkpoint": "C:\\dev\\WITECK_FINAL_TRAINING_CODE_v1.0.1_DIRECT_TEMPLATE\\output\\shared_dual_head\\seed_40\\shared_dual_head.pt",
-  "architecture": "hand-only shared two-stream 1D-CNN + gesture/user embedding heads",
-  "embedding_dim": 128,
-  "input_contract": {
-    "raw": "MediaPipe Hand landmarks",
-    "sequence_length": 32,
-    "feature_dim": 127,
-    "right_hand_only": true
-  },
-  "threading": {
-    "internal_rlock": true,
-    "backend_model_forward_lock_required": false
-  },
-  "matching": {
-    "owner": "backend",
-    "similarity": "cosine",
-    "policy": "one gesture template + one user template per user"
-  },
-  "python_bytecode": {
-    "included": false,
-    "rule": "__pycache__ and *.pyc excluded from manifest and ZIP"
-  },
-  "files": [
-    {
-      "path": "__init__.py",
-      "bytes": 672,
-      "sha256": "f1f2cc88fb7f9d35c64ab4e713e50e7bfdace06c6b17a5e7208a7f026b133068"
-    },
-    {
-      "path": "calibration_report.md",
-      "bytes": 1463,
-      "sha256": "c778a45c05830b2219eaa86793e231f26534f1ab985ca93d203600cea93692af"
-    },
-    {
-      "path": "encoder.py",
-      "bytes": 6442,
-      "sha256": "885f8b7fdb6e26403814adcbc359e7ac280140e98d71c9f542ad0286e5488486"
-    },
-    {
-      "path": "features.py",
-      "bytes": 7124,
-      "sha256": "f88302a7ab31d6c484cb99ac7c6242e7102087edf7cfaa4135561512a9f4946b"
-    },
-    {
-      "path": "model_defs.py",
-      "bytes": 2675,
-      "sha256": "f1488cce68c6c87993c389a33568931c25d2ff5220cc5227b54846286b5d105b"
-    },
-    {
-      "path": "preprocess.json",
-      "bytes": 8706,
-      "sha256": "aadf1eb93fc6ec977027234b81d6693f3987282c56258450873cb5ce85c6c044"
-    },
-    {
-      "path": "README.md",
-      "bytes": 2417,
-      "sha256": "ea08cbaf66c6334af3a2c45359641eeefe075d7fe5614aa5bb824eb6cdfd6475"
-    },
-    {
-      "path": "requirements.txt",
-      "bytes": 27,
-      "sha256": "06fafc21fa0dca1019c94c341f0cdc33373034748db93a8fd9666eb9a260e733"
-    },
-    {
-      "path": "smoke_test.py",
-      "bytes": 2146,
-      "sha256": "1cbbeda3edfe11f4274eaa825c70b5e83544ed4f57838bea264234ff28b239d9"
-    },
-    {
-      "path": "thresholds.json",
-      "bytes": 857,
-      "sha256": "919557306af992bba6ce3dec65aec91ca52822334860f599601c325d173efd32"
-    },
-    {
-      "path": "weights/shared_dual_head_v1.pt",
-      "bytes": 614117,
-      "sha256": "18b70faaab5ce1ed89990379d48253d042d0ed21ca381c9a20afa01788b15266"
-    }
-  ]
+  "model_version": "witeck-mobile-shared-dual-head-g1g24-v1.0.0",
+  "architecture": "hand-only-shared-two-stream-dual-head",
+  "input_shape": [32, 127],
+  "embedding_dim_per_head": 128,
+  "heads": ["gesture", "user"],
+  "enrollment_takes": 3,
+  "final_rule": "gesture_score >= gesture_threshold AND user_score >= user_threshold",
+  "candidate_checkpoint": "CPU seed 42 selected by lowest User validation EER among seeds 40-44",
+  "evaluation_scope": "P08-P10 enroll G5; leakage-safe non-training impostors",
+  "known_limit": "Unseen-user plus arbitrary unseen-personal-gesture live performance is not yet directly validated"
 }

@@ -1,4 +1,4 @@
-"""Stable FastAPI integration surface for WITECK Shared Dual-Head."""
+"""Stable backend interface for WITECK mobile Shared Dual Head v1.0.0."""
 
 from __future__ import annotations
 
@@ -11,190 +11,159 @@ import numpy as np
 import torch
 
 try:
-    from .features import InvalidSequenceError, build_hand_features
+    from .features import build_hand_features
     from .model_defs import SharedDualHead1DCNN
 except ImportError:
-    from features import InvalidSequenceError, build_hand_features
+    from features import build_hand_features
     from model_defs import SharedDualHead1DCNN
 
 
-MODEL_VERSION = "shared-dual-head-v1.1.0"
+MODEL_VERSION = "witeck-mobile-shared-dual-head-g1g24-v1.0.0"
 EMBEDDING_DIM = 128
+ENROLLMENT_TAKES = 3
 
 _ROOT = Path(__file__).resolve().parent
-_MODEL_PATH = _ROOT / "weights" / "shared_dual_head_v1.pt"
-_PREPROCESS_PATH = _ROOT / "preprocess.json"
-_THRESHOLDS_PATH = _ROOT / "thresholds.json"
-
-_STATE_LOCK = threading.RLock()
-_MODEL = None
-_CKPT = None
-_DEVICE = None
-_PREPROCESS = None
-_THRESHOLDS = None
+_WEIGHT_PATH = _ROOT / "weights" / "shared_dual_head.pt"
+_LOCK = threading.RLock()
+_MODEL: SharedDualHead1DCNN | None = None
+_CHECKPOINT: dict | None = None
 
 
-def _load_json(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+def _unit(value: np.ndarray, axis: int = -1) -> np.ndarray:
+    value = np.asarray(value, dtype=np.float32)
+    return value / np.maximum(np.linalg.norm(value, axis=axis, keepdims=True), 1e-12)
 
 
-def _construct_model(device: torch.device):
-    ckpt = torch.load(_MODEL_PATH, map_location=device, weights_only=False)
-    if int(ckpt["input_dim"]) != 127:
-        raise RuntimeError("release weight does not match the D=127 feature contract")
+def load_model(device: str = "cpu") -> dict:
+    """Load weights once during FastAPI startup. Repeated calls are harmless."""
 
-    train_users = ckpt.get("train_users")
-    if train_users is not None:
-        num_user_classes = len(train_users)
-    else:
-        # Fallback for checkpoints that explicitly saved num_user_classes.
-        num_user_classes = int(ckpt["num_user_classes"])
-
-    model = SharedDualHead1DCNN(
-        input_dim=int(ckpt["input_dim"]),
-        num_user_classes=num_user_classes,
-        embedding_dim=int(ckpt["embedding_dim"]),
-    )
-    model.load_state_dict(ckpt["model_state_dict"], strict=True)
-    return model.to(device).eval(), ckpt
-
-
-def load_model(device: str = "cpu"):
-    """Load the Dual-Head model once. Repeated calls are harmless and thread-safe."""
-
-    global _MODEL, _CKPT, _DEVICE, _PREPROCESS, _THRESHOLDS
-    requested_device = torch.device(device)
-
-    with _STATE_LOCK:
+    global _MODEL, _CHECKPOINT
+    with _LOCK:
         if _MODEL is None:
-            if not _MODEL_PATH.exists():
-                raise FileNotFoundError(
-                    f"Missing release weight: {_MODEL_PATH}. "
-                    "Run finalize_release.py with the trained checkpoint first."
-                )
-            _MODEL, _CKPT = _construct_model(requested_device)
-            _DEVICE = requested_device
-            _PREPROCESS = _load_json(_PREPROCESS_PATH)
-            _THRESHOLDS = _load_json(_THRESHOLDS_PATH)
-
-    return {
-        "model_version": MODEL_VERSION,
-        "device": str(next(_MODEL.parameters()).device),
-        "embedding_dim": EMBEDDING_DIM,
-    }
+            target = torch.device(device)
+            checkpoint = torch.load(_WEIGHT_PATH, map_location=target, weights_only=False)
+            if checkpoint.get("architecture") != "hand-only-shared-two-stream-dual-head":
+                raise RuntimeError("unexpected checkpoint architecture")
+            model = SharedDualHead1DCNN(
+                input_dim=int(checkpoint["input_dim"]),
+                num_user_classes=len(checkpoint["train_users"]),
+                embedding_dim=int(checkpoint["embedding_dim"]),
+            )
+            model.load_state_dict(checkpoint["model_state_dict"])
+            _MODEL = model.to(target).eval()
+            _CHECKPOINT = checkpoint
+    return release_metadata()
 
 
-def _ensure_loaded():
+def _ensure_loaded() -> tuple[SharedDualHead1DCNN, dict]:
     if _MODEL is None:
         load_model("cpu")
+    assert _MODEL is not None and _CHECKPOINT is not None
+    return _MODEL, _CHECKPOINT
 
 
-def _normalization():
-    if _PREPROCESS is None:
-        _ensure_loaded()
-    section = _PREPROCESS["dual_head"]
-    mean = np.asarray(section["sequence_mean"], dtype=np.float32)
-    std = np.asarray(section["sequence_std"], dtype=np.float32)
-    duration_mean = float(section["duration_mean"])
-    duration_std = float(section["duration_std"])
-    return mean, std, duration_mean, duration_std
-
-
-def _normalize(features: np.ndarray, durations: np.ndarray):
-    mean, std, duration_mean, duration_std = _normalization()
-    features = (features - mean) / np.maximum(std, 1e-8)
-    durations = (durations - duration_mean) / max(duration_std, 1e-8)
-    return features.astype(np.float32), durations.astype(np.float32)
-
-
-def _prepare_one(payload: Any):
-    features, duration = build_hand_features(payload)
-    return features, np.float32(duration)
-
-
-def _prepare_batch(payloads: Sequence[Any]):
-    if not isinstance(payloads, Sequence) or isinstance(payloads, (str, bytes)):
-        raise InvalidSequenceError("payloads must be a sequence")
-    if len(payloads) == 0:
-        raise InvalidSequenceError("payloads must not be empty")
-
-    built = [_prepare_one(payload) for payload in payloads]
-    features = np.stack([item[0] for item in built], axis=0)
-    durations = np.asarray([item[1] for item in built], dtype=np.float32)
-    return features, durations
-
-
-@torch.inference_mode()
-def _forward_batch(payloads: Sequence[Any]):
-    _ensure_loaded()
-    features, durations = _prepare_batch(payloads)
-    features, durations = _normalize(features, durations)
-
-    xb = torch.from_numpy(features).to(_DEVICE)
-    db = torch.from_numpy(durations).to(_DEVICE)
-
-    # Preserve the previous release's concurrency contract:
-    # backend code does NOT need to add a separate model-forward lock.
-    with _STATE_LOCK:
-        gesture, user = _MODEL(xb, db)
-
+def _forward(features: np.ndarray, durations: np.ndarray):
+    model, checkpoint = _ensure_loaded()
+    mean = np.asarray(checkpoint["sequence_mean"], dtype=np.float32)
+    std = np.asarray(checkpoint["sequence_std"], dtype=np.float32)
+    duration_mean = float(checkpoint["duration_mean"])
+    duration_std = float(checkpoint["duration_std"])
+    x = ((features.astype(np.float32) - mean) / std).astype(np.float32)
+    d = ((durations.astype(np.float32) - duration_mean) / duration_std).astype(np.float32)
+    device = next(model.parameters()).device
+    with _LOCK, torch.inference_mode():
+        gesture, user, _ = model(
+            torch.from_numpy(x).to(device),
+            torch.from_numpy(d).to(device),
+        )
     return (
-        gesture.detach().cpu().numpy().astype(np.float32, copy=False),
-        user.detach().cpu().numpy().astype(np.float32, copy=False),
+        _unit(gesture.cpu().numpy(), axis=1),
+        _unit(user.cpu().numpy(), axis=1),
     )
 
 
-def embed_gesture(payload: Any) -> np.ndarray:
-    """Return one L2-normalized 128-D gesture embedding from raw landmark payload."""
-    gesture, _ = _forward_batch([payload])
-    return gesture[0]
+def embed_preprocessed(features: np.ndarray, duration_sec: float):
+    """Embed an already-built ``[32,127]`` feature tensor."""
+
+    features = np.asarray(features, dtype=np.float32)
+    if features.shape != (32, 127):
+        raise ValueError(f"expected [32,127], got {features.shape}")
+    gesture, user = _forward(
+        features[None, ...], np.asarray([duration_sec], dtype=np.float32)
+    )
+    return gesture[0], user[0]
 
 
-def embed_user(payload: Any) -> np.ndarray:
-    """Return one L2-normalized 128-D user embedding from raw landmark payload."""
-    _, user = _forward_batch([payload])
-    return user[0]
+def embed(frames: Any) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(gesture_embedding[128], user_embedding[128])``."""
+
+    features, duration = build_hand_features(frames)
+    return embed_preprocessed(features, duration)
 
 
-def embed_gesture_batch(payloads: Sequence[Any]) -> np.ndarray:
-    """Return [N,128] L2-normalized gesture embeddings."""
-    gesture, _ = _forward_batch(payloads)
-    return gesture
+def embed_batch(list_of_frames: Sequence[Any]) -> tuple[np.ndarray, np.ndarray]:
+    """Return two L2-normalized arrays, each with shape ``[N,128]``."""
+
+    prepared = [build_hand_features(payload) for payload in list_of_frames]
+    if not prepared:
+        empty = np.empty((0, EMBEDDING_DIM), dtype=np.float32)
+        return empty, empty.copy()
+    features = np.stack([item[0] for item in prepared]).astype(np.float32)
+    durations = np.asarray([item[1] for item in prepared], dtype=np.float32)
+    return _forward(features, durations)
 
 
-def embed_user_batch(payloads: Sequence[Any]) -> np.ndarray:
-    """Return [N,128] L2-normalized user embeddings."""
-    _, user = _forward_batch(payloads)
-    return user
+def enroll(takes: Sequence[Any]) -> dict[str, np.ndarray | str | int]:
+    """Create both templates from at least three captures; no retraining occurs."""
 
-
-def embed_both(payload: Any):
-    """Efficiently compute both embeddings with one model forward pass."""
-    gesture, user = _forward_batch([payload])
+    if len(takes) < ENROLLMENT_TAKES:
+        raise ValueError(f"at least {ENROLLMENT_TAKES} enrollment takes are required")
+    gesture, user = embed_batch(takes)
     return {
-        "gesture_embedding": gesture[0],
-        "user_embedding": user[0],
+        "model_version": MODEL_VERSION,
+        "takes": len(takes),
+        "gesture_template": _unit(gesture.mean(axis=0)),
+        "user_template": _unit(user.mean(axis=0)),
     }
 
 
-def embed_both_batch(payloads: Sequence[Any]):
-    """Efficiently compute both embedding matrices with one model forward pass."""
-    gesture, user = _forward_batch(payloads)
+def verify(
+    frames: Any,
+    gesture_template: np.ndarray,
+    user_template: np.ndarray,
+    *,
+    gesture_threshold: float | None = None,
+    user_threshold: float | None = None,
+) -> dict[str, float | bool | str]:
+    """Verify one capture. Both heads must pass."""
+
+    _, checkpoint = _ensure_loaded()
+    gesture_embedding, user_embedding = embed(frames)
+    gesture_score = float(gesture_embedding @ _unit(gesture_template))
+    user_score = float(user_embedding @ _unit(user_template))
+    tg = float(
+        checkpoint["gesture_threshold"]
+        if gesture_threshold is None
+        else gesture_threshold
+    )
+    tu = float(
+        checkpoint["user_threshold"] if user_threshold is None else user_threshold
+    )
     return {
-        "gesture_embeddings": gesture,
-        "user_embeddings": user,
+        "model_version": MODEL_VERSION,
+        "gesture_score": gesture_score,
+        "user_score": user_score,
+        "gesture_threshold": tg,
+        "user_threshold": tu,
+        "gesture_passed": gesture_score >= tg,
+        "user_passed": user_score >= tu,
+        "passed": gesture_score >= tg and user_score >= tu,
     }
 
 
-def get_thresholds() -> dict:
-    _ensure_loaded()
-    return dict(_THRESHOLDS)
-
-
-def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
-    """Optional helper. Backend may instead compute normalized-vector dot products."""
-    a = np.asarray(a, dtype=np.float32).reshape(-1)
-    b = np.asarray(b, dtype=np.float32).reshape(-1)
-    a = a / max(float(np.linalg.norm(a)), 1e-12)
-    b = b / max(float(np.linalg.norm(b)), 1e-12)
-    return float(np.dot(a, b))
+def release_metadata() -> dict:
+    with (_ROOT / "manifest.json").open(encoding="utf-8") as handle:
+        result = json.load(handle)
+    if _MODEL is not None:
+        result["device"] = str(next(_MODEL.parameters()).device)
+    return result

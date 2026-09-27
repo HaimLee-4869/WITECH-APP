@@ -1,32 +1,23 @@
-"""WITECK deployable Shared Dual-Head model package."""
-
 from .encoder import (
     EMBEDDING_DIM,
+    ENROLLMENT_TAKES,
     MODEL_VERSION,
-    cosine_similarity,
-    embed_both,
-    embed_both_batch,
-    embed_gesture,
-    embed_gesture_batch,
-    embed_user,
-    embed_user_batch,
-    get_thresholds,
+    embed,
+    embed_batch,
+    enroll,
     load_model,
+    release_metadata,
+    verify,
 )
-from .features import InvalidSequenceError, build_hand_features
 
 __all__ = [
-    "EMBEDDING_DIM",
     "MODEL_VERSION",
-    "InvalidSequenceError",
-    "build_hand_features",
+    "EMBEDDING_DIM",
+    "ENROLLMENT_TAKES",
     "load_model",
-    "embed_user",
-    "embed_gesture",
-    "embed_user_batch",
-    "embed_gesture_batch",
-    "embed_both",
-    "embed_both_batch",
-    "get_thresholds",
-    "cosine_similarity",
+    "embed",
+    "embed_batch",
+    "enroll",
+    "verify",
+    "release_metadata",
 ]
