@@ -3,9 +3,12 @@
 수어 제스처 기반 비접촉 인증 시스템의 FastAPI 백엔드. Flutter 앱과 AI 모델 사이를 연결하고
 사용자·등록·인증 이력을 관리한다. 설계 근거는 [`../BACKEND_SPEC.md`](../BACKEND_SPEC.md).
 
-> `ai/`에는 AI팀 릴리스 **`shared-dual-head-v1.1.1`**이 들어 있다 (2026-09-17 교체).
-> 이전 릴리스는 `ai_v1.0.0_baseline/`에 보관한다(쓰이지 않음).
+> `ai/`에는 AI팀 릴리스 **`witeck-mobile-shared-dual-head-g1g24-v1.0.0`**이 들어 있다 (2026-09-27 교체).
+> 이전 릴리스는 `ai_v1.1.1_baseline/`, `ai_v1.0.0_baseline/`에 보관한다(쓰이지 않음).
 > 원본 문서는 `ai/README.md`, `ai/manifest.json`. 성능 한계는 [9장](#9-알려진-한계)을 볼 것.
+> 릴리스 ZIP `WITECK_BACKEND_MOBILE_DUAL_HEAD_v1.0.0.zip` SHA-256
+> `27723f2ca8acf6540726cc6500441b3c01e493f379130f3336b429ad8e8b8d29`
+> (manifest에 파일별 해시가 없어 이 값이 유일한 무결성 근거다).
 >
 > **판정은 관문 두 개다.** `gesture_score >= Tg AND user_score >= Tu`.
 > user 관문만 있던 v1.0.0에서는 본인이 등록과 다른 동작을 해도 통과했다.
@@ -107,7 +110,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | GET | `/stats/monthly?months=5` | 월별 인증 건수 (KST, 0건인 달 포함) |
 | GET | `/health` | 상태, 모델 버전, 활성 threshold |
 | GET | `/admin/thresholds` | 활성 모델의 threshold 운영점 목록 |
-| POST | `/admin/threshold` | 활성 운영점 전환 `{basis: "default" \| "demo_relaxed"}` (두 관문이 함께 바뀐다) |
+| POST | `/admin/threshold` | 활성 운영점 전환 `{basis}` (두 관문이 함께 바뀐다) |
 | POST | `/admin/reindex` | 재색인 `{modelVersion, dryRun}` |
 | PATCH | `/admin/config` | `app_config` 변경 |
 | POST/GET/DELETE | `/debug/challenge` | 앱의 Challenge 판정 로그 (개발용, 6.6장) |
@@ -134,8 +137,12 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
   손이 검출되지 않은 프레임은 `"lm": null`로 보내도 된다 (보내지 않아도 된다).
 - 최소 조건: 프레임 8개 이상, 손 검출 프레임 8개 이상, 첫–마지막 `tMs` 간격 750ms 이상.
   8~31프레임은 AI 모듈이 보간한다. **앱이 패딩하지 말 것.**
-- **오른손만 허용.** `frames[].handedness`를 MediaPipe 값 그대로 보낼 것. 왼손이 섞이면 422 `wrong_hand`로
-  거절된다. handedness를 아예 보내지 않으면 모델이 검사하지 못하므로 앱이 화면에서 강제해야 한다
+- **`durationMs`·`nominalFps`를 보낼 것.** AI 모듈은 `totalFrames / fps`를 촬영 길이로 보고 이 값이
+  **모델 입력**이다. 백엔드가 `totalFrames = durationMs × nominalFps / 1000`으로 채운다.
+  `durationMs`는 녹화 길이(현재 4000), `nominalFps`는 명목값(30)이면 된다 — 실제 fps가 13~16이어도
+  촬영 길이만 맞으면 된다. 빠지면 첫–마지막 `tMs` 간격으로 대신한다.
+- **handedness**: 보내면 모듈이 왼손을 오른손으로 미러링해 받는다(거절하지 않는다). 현재 앱처럼
+  보내지 않으면 미러링되지 않으므로 화면에서 오른손 사용을 안내한다
   (실제 왼손 입력을 `Right`로 위장해 보내면 인식률이 떨어진다).
 - `capturedAt`은 **오프셋 포함** ISO-8601 (`2026-09-16T10:39:01+09:00`). 오프셋이 없으면 UTC로 간주한다.
 - 실패 응답은 모두 `{"detail": {"code", "reason", "message"}}`. 앱은 `reason`으로 분기하고 `message`를 그대로 보여줘도 된다.
@@ -179,20 +186,21 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 | `gestureId` | ✅ | 템플릿 조회 키. 서버는 분류하지 않고 이 값으로 찾는다 |
 | `camera.width`, `camera.height` | ✅ | |
 | `frames` | ✅ | |
-| `capturedAt`, `nominalFps`, `durationMs` | 선택 | 기록용 |
+| `nominalFps`, `durationMs` | 권장 | AI 모듈의 촬영 길이 입력 (4.1) |
+| `capturedAt` | 선택 | 기록용 |
 
 응답 200 — 통과:
 
 ```json
 {
-  "score": 0.7134,
-  "threshold": 0.342350,
+  "score": 0.9134,
+  "threshold": 0.824399,
   "gestureScore": 0.9871,
-  "gestureThreshold": 0.902032,
+  "gestureThreshold": 0.937421,
   "passed": true,
   "reason": null,
   "gestureId": "G3",
-  "modelVersion": "shared-dual-head-v1.1.0",
+  "modelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0",
   "latencyMs": 42
 }
 ```
@@ -202,13 +210,13 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 ```json
 {
   "score": null,
-  "threshold": 0.342350,
+  "threshold": 0.824399,
   "gestureScore": null,
-  "gestureThreshold": 0.902032,
+  "gestureThreshold": 0.937421,
   "passed": false,
   "reason": "no_template",
   "gestureId": "G2",
-  "modelVersion": "shared-dual-head-v1.1.0",
+  "modelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0",
   "latencyMs": 7
 }
 ```
@@ -283,7 +291,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
   "gestureId": "G3",
   "takeCount": 3,
   "required": 3,
-  "modelVersion": "shared-dual-head-v1.1.0"
+  "modelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0"
 }
 ```
 
@@ -310,7 +318,7 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
   "enrollmentGestures": 1,
   "captureDurationMs": 4000,
   "handRequired": "right",
-  "modelVersion": "shared-dual-head-v1.1.0",
+  "modelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0",
   "postAuthUrl": "https://www.naver.com",
   "challenge": {
     "ruleVersion": "2026-09-16.opposite-first-fails",
@@ -354,14 +362,14 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
       "userName": "김길동",
       "department": "개발팀",
       "claimedGestureId": "G3",
-      "score": 0.7134,
-      "threshold": 0.342350,
+      "score": 0.9134,
+      "threshold": 0.824399,
       "gestureScore": 0.9871,
-      "gestureThreshold": 0.902032,
+      "gestureThreshold": 0.937421,
       "passed": true,
       "failReason": null,
-      "authModelVersion": "shared-dual-head-v1.1.0",
-      "gestureModelVersion": "handonly-gesture-1dcnn-v1.0.0",
+      "authModelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0",
+      "gestureModelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0",
       "latencyMs": 42,
       "createdAt": "2026-09-16T01:39:01.123456+00:00"
     }
@@ -442,13 +450,12 @@ curl -X PATCH localhost:8000/admin/config -H 'Content-Type: application/json' -d
 
 | `reason` | 조건 | 기본 `message` |
 |---|---|---|
-| `too_few_frames` | 전체 프레임 8개 미만 | 촬영된 프레임이 너무 적습니다. 다시 시도해주세요. |
+| `too_few_frames` | 전체 프레임 8개 미만 (백엔드 검사) | 촬영된 프레임이 너무 적습니다. 다시 시도해주세요. |
 | `insufficient_valid_frames` | 손 검출 프레임 8개 미만 | 손이 충분히 인식되지 않았습니다. 다시 시도해주세요. |
-| `duration_too_short` | 첫–마지막 `tMs` 750ms 미만 | 동작이 너무 짧습니다. 조금 더 천천히 해주세요. |
-| `non_monotonic_timestamps` | `tMs`가 증가하지 않음 | 촬영 시간 정보가 올바르지 않습니다. 다시 시도해주세요. |
+| `duration_too_short` | 첫–마지막 `tMs` 750ms 미만 (백엔드 검사) | 동작이 너무 짧습니다. 조금 더 천천히 해주세요. |
+| `non_monotonic_timestamps` | `tMs`가 보낸 순서대로 엄격히 증가하지 않음 (백엔드 검사. 모듈은 정렬해 받아버린다) | 촬영 시간 정보가 올바르지 않습니다. 다시 시도해주세요. |
 | `missing_camera_size` | `camera.width`/`height` 누락 | 카메라 해상도 정보가 없습니다. 앱을 최신 버전으로 업데이트해주세요. |
 | `malformed_landmarks` | 21×3이 아니거나 NaN/Inf | 손 좌표 형식이 올바르지 않습니다. 다시 시도해주세요. |
-| `wrong_hand` | 프레임 `handedness`에 왼손이 있음 (명세 1장에 없던 조건) | 오른손을 사용해주세요. 이 모델은 오른손 동작만 인식합니다. |
 | `invalid_sequence` | 위로 분류되지 않은 AI 모듈 거절 | 입력을 처리할 수 없습니다. 다시 시도해주세요. |
 
 **그 외**
@@ -475,18 +482,18 @@ dual-head는 관문이 둘이라 **운영점 하나가 두 값(Tu, Tg)** 을 갖
 한 행씩(`gate` 컬럼) 들어가고, `basis`로 묶어 함께 전환한다. 요청마다 활성 행을 읽으므로
 **전환 즉시 반영, 재시작 불필요.**
 
-| basis | Tu (본인) | Tg (동작) | 검증셋 user FAR/FRR |
+| basis | Tu (본인) | Tg (동작) | 출처 |
 |---|---|---|---|
-| `default` (기본) | 0.342350 | 0.902032 | 4.05% / 4.29% |
-| `demo_relaxed` | 0.293309 | 0.902032 | 4.76% / 2.86% |
+| `default` (기본) | 0.824398994 | 0.937420845 | 체크포인트 검증셋 EER (user EER 14.29%, gesture EER 5.80%) |
 
-`demo_relaxed`는 **user 관문만** 낮춘다. 시연에서 본인 거부가 잦을 때 쓴다.
-동작이 안 맞아 막히는 경우(`gesture_gate`)는 이 운영점으로 풀리지 않는다.
+v1.0.0 mobile 릴리스는 운영점을 **하나만** 준다(v1.1.1의 `demo_relaxed`는 없다).
+다른 운영점이 필요하면 같은 `model_version`으로 `thresholds`에 user/gesture 두 행(같은 `basis`)을
+넣은 뒤 전환한다. AI팀 thresholds.json은 "다른 체크포인트에 재사용하지 말 것"이라고 명시한다.
 
 ```bash
 curl localhost:8000/admin/thresholds
 curl -X POST localhost:8000/admin/threshold \
-  -H 'Content-Type: application/json' -d '{"basis": "demo_relaxed"}'
+  -H 'Content-Type: application/json' -d '{"basis": "default"}'
 ```
 
 `auth_logs`에는 시도마다 두 점수와 두 임계값이 모두 남는다.
@@ -589,17 +596,29 @@ PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로
 
 ### 7.0 가장 먼저: AI 입력 형태 확인
 
-> **v1.0.0 교체 시 실제로 틀렸던 부분이다.** 릴리스가 바뀌면 여기부터 확인한다.
+> **교체 때마다 실제로 틀렸던 부분이다.** 릴리스가 바뀌면 여기부터 확인한다.
 >
-> 현재 백엔드가 `embed()` / `classify_gesture()`에 넘기는 형태 (v1.0.0 기준, 실측 확인):
+> 현재 백엔드가 `encoder.embed()` / `embed_batch()`에 넘기는 형태 (witeck-mobile-shared-dual-head-g1g24-v1.0.0 기준, 실측 확인):
 >
 > ```python
 > {
 >   "width": 720, "height": 1280,          # 최상위. camera 중첩이 아니다
->   "frames": [{"tMs": 0.0, "landmarks": [[x, y, z], ...21개] | None,
+>   "fps": 30.0, "totalFrames": 120,       # nominalFps, round(durationMs × fps / 1000)
+>   "frames": [{"frameIndex": 0, "tMs": 0.0, "landmarks": [[x, y, z], ...21개] | None,
 >              "handedness": "Right", "valid": True}, ...]
 > }
 > ```
+>
+> **반환 순서: `embed()`는 `(gesture, user)`다.** `ai_gateway.embed_both*`가 `(user, gesture)`로
+> 뒤집어 돌려준다. 뒤집는 곳은 여기 한 곳뿐이고 `tests/test_ai_contract.py`가 확인한다.
+>
+> **`fps`·`totalFrames`를 빼면 조용히 틀린다.** 모듈은 `duration = totalFrames / fps`를 모델에
+> 넣는데, 없으면 fps=30, totalFrames=검출 프레임 수로 채운다. 13~16fps 기기의 4초 촬영이
+> 2초로 들어가 본인 user 점수가 0.73으로 떨어진다(Tu 0.824). `frameIndex`는 valid mask 복원에만
+> 쓰이고, 이 체크포인트는 valid mask를 입력으로 쓰지 않는다.
+>
+> **모듈이 하지 않는 거절은 백엔드가 한다** (`ai_gateway.check_sequence`): 프레임 8개 미만,
+> `tMs` 비단조(모듈은 정렬 후 중복만 거절), 750ms 미만(모듈은 하한이 없다).
 >
 > 이 변환은 **`app/services/ai_gateway.py`의 `to_ai_input()` 한 곳**에만 있다.
 > 등록·인증·재색인·검증 스크립트가 모두 이 함수를 거친다. 모듈이 바뀌면 이 함수만 고친다.
@@ -608,11 +627,12 @@ PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로
 > 명세 1장의 거절 조건이 동작하지 않는다.
 >
 > 함께 확인할 것:
-> - `InvalidSequenceError` 위치. v1.0.0은 `encoder.py`가 아니라 **`features.py`에만** 정의한다.
+> - `InvalidSequenceError` 위치. 지금 릴리스는 `encoder.py`가 아니라 **`features.py`에만** 정의한다.
 >   백엔드는 `ai_gateway.py`가 양쪽을 다 시도해 받아온다.
-> - 예외에 사유 코드 속성(`reason`)이 있는지. v1.0.0은 없어서 메시지 문구로 추정한다
+> - 예외에 사유 코드 속성(`reason`)이 있는지. 모듈 예외에는 없어서 메시지 문구로 추정한다
 >   (`_REASON_PATTERNS`). 7.1의 검증 스크립트가 추정이 틀리면 WARN으로 알려준다.
-> - `classify_gesture()` 라벨이 `G1`~`G5` 문자열인지 (`gestures` 테이블 ID와 같아야 함)
+> - `enroll()`/`verify()`는 쓰지 않는다. take별 벡터(`embeddings`)와 DB threshold 전환이 필요해서
+>   centroid(평균 → 재정규화)와 판정은 백엔드가 한다. 계산은 모듈의 `enroll()`과 같다.
 
 ### 7.1 절차
 
@@ -620,19 +640,21 @@ PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로
 2. **파일 복사**: `ai_release/`의 `encoder.py`, `features.py`, `model_defs.py`, `weights/`, `preprocess.json`,
    `thresholds.json`, `manifest.json`을 `backend/ai/`에 복사한다 (README는 `ai/AI_RELEASE_README.md`로).
    `ai/__init__.py`는 비워 둔다 (릴리스의 `__init__.py`를 덮어쓰지 말 것 — 상대 import가 꼬인다).
-   `manifest.json`의 sha256으로 파일 무결성을 확인한다.
+   `manifest.json`의 sha256으로 파일 무결성을 확인한다. 파일별 해시가 없으면(v1.0.0 mobile)
+   AI팀이 준 ZIP 전체 해시를 확인하고, 압축 해제본이 ZIP과 같은지 `diff -r`로 본다.
 3. **의존성 병합**: `ai_release/requirements.txt`의 `torch` 등을 `backend/requirements.txt`에 추가.
    `numpy==1.26.4`가 양쪽에서 같은지 확인. `pip install -r requirements.txt`.
    (v1.0.0: `torch==2.8.0`. CPU 휠로 충분하다.)
 4. **가중치 확인**: `python ai_release/smoke_test.py`
 5. **계약 검증**: `python scripts/verify_ai_release.py`
-   - manifest 해시, 공개 API, 내부 락, **두 헤드** 각각 `(128,)` `float32` L2 norm=1,
-     `embed_both` 일치, 결정성, 배치 일치, 운영점별 Tu/Tg, 거절 조건 8종 (전체 20항목).
+   - manifest 해시(없으면 WARN), 공개 API, 내부 락, **두 헤드** 각각 `(128,)` `float32` L2 norm=1,
+     결정성, 배치 순서 일치, 시드 threshold = 릴리스, duration = 촬영 길이, 거절 조건 8종 (전체 21항목).
    - `FAIL`이 있으면 종료 코드 1. `embed`부터 줄줄이 실패하면 7.0의 입력 형태가 다른 것이다.
    - `[WARN] 사유 코드 ...`가 뜨면 `_REASON_PATTERNS` 조정.
 6. **threshold 반영**: `python scripts/import_thresholds.py` (`ai/thresholds.json` → `app/default_thresholds.json`).
-   릴리스의 `operating_points{default, demo_relaxed}`를 `operatingPoints[{basis, userThreshold, gestureThreshold}]`로
-   옮긴다(값은 풀 정밀도).
+   릴리스의 `operating_points{...}`(또는 v1.0.0 mobile처럼 한 쌍만 있으면 `default` 하나)를
+   `operatingPoints[{basis, userThreshold, gestureThreshold}]`로 옮긴다(값은 풀 정밀도).
+   버전이 파일에 없으면 같은 폴더 `manifest.json`의 `model_version`을 쓴다.
    서버를 띄우면 새 `MODEL_VERSION`에 대해 운영점 2종 × 관문 2개가 자동으로 들어간다 (이미 그 버전 행이 있으면 건드리지 않는다).
    파일을 고치기 전에 서버를 먼저 띄웠다면 `thresholds` 테이블에서 새 `model_version` 행을 지우고 재시작한다.
    값은 재색인 후 `GET /admin/thresholds`로 확인 (활성 모델 버전 기준으로 보여준다).
@@ -640,9 +662,9 @@ PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로
    ```bash
    curl localhost:8000/health        # status=degraded, modelVersion=옛 버전, loadedModelVersion=새 버전
    curl -X POST localhost:8000/admin/reindex -H 'Content-Type: application/json' \
-        -d '{"modelVersion": "shared-dual-head-v1.1.0", "dryRun": true}'     # 실패 건 먼저 확인
+        -d '{"modelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0", "dryRun": true}'     # 실패 건 먼저 확인
    curl -X POST localhost:8000/admin/reindex -H 'Content-Type: application/json' \
-        -d '{"modelVersion": "shared-dual-head-v1.1.0", "dryRun": false}'
+        -d '{"modelVersion": "witeck-mobile-shared-dual-head-g1g24-v1.0.0", "dryRun": false}'
    curl localhost:8000/health        # status=ok
    ```
    재색인 전까지 `/verify`는 503 `model_version_mismatch`다.
@@ -679,52 +701,55 @@ PATCH는 **깊은 병합**이다. 보낸 키만 바뀌고 나머지는 그대로
 
 ## 9. 알려진 한계
 
-**모델 성능 (AI팀 `ai/calibration_report.md`)**
+**모델 성능 (AI팀 `ai/README.md`, 포함 가중치의 재현 평가)**
 
-| 지표 (P08~P10, 신규 사용자 7,275 trial) | 값 |
+| 지표 (P08~P10 G5 등록 proxy) | 값 |
 |---|---|
-| Accuracy | 95.77% |
-| **Genuine FRR** | **28.04%** |
-| Combined Attack FAR | 3.22% |
-| Wrong-Gesture FAR | 1.52% |
-| **Same-Gesture Impostor FAR** | **17.34%** |
-| Random Impostor FAR | 0.13% |
+| Accuracy | 95.46% |
+| Balanced Accuracy | 92.05% |
+| **Genuine FRR** | **11.67%** |
+| Combined FAR | 4.23% |
+| Wrong-Gesture FAR | 0.00% |
+| **Same-Gesture Impostor FAR** | **23.98%** |
+| Random-Impostor FAR | 0.00% |
 
-검증셋(학습에 참여한 사용자) 수치는 gesture EER 0%, user EER 4.17%인데, **그대로 인용하면 안 된다.**
-AI팀 문서가 "validation Gesture EER 0%를 자유 제스처 성능으로 제시하지 말 것"이라고 명시한다.
+본인 거부는 v1.1.1(28.04%)보다 줄었지만 **같은 동작을 아는 공격자 통과가 4명 중 1명꼴**이다.
+AI팀도 "배포 수준으로 충분히 낮지 않다"고 명시했다. 출입 통제 수준으로 표현하면 안 된다.
+(v1.1.1과는 평가 조건이 달라 수치를 직접 비교할 수 없다.)
 
-신규 사용자 FRR 28.04%는 본인도 10번 중 3번쯤 거부된다는 뜻이다(v1.0.0의 40.54%에서 개선).
-주 병목은 같은 동작을 아는 공격자(17.34%)다. 출입 통제 수준으로 표현하면 안 된다.
-
-**P08~P10도 제스처는 G1~G5다.** "Unseen User + Known Gesture"이지 자유 제스처 결과가 아니다.
+**평가 조건은 P08~P10의 G5 등록 proxy다.** 완전히 새로운 사용자 + 자유 제스처 조합을 앱에서
+직접 평가한 결과가 아니다(manifest `known_limit`).
 
 **백엔드**
 
-- **`encoder.MODEL_VERSION`이 `shared-dual-head-v1.1.0`이다.** 패키지·thresholds·manifest는 `v1.1.1`인데
-  코드 상수만 올라가지 않았다(AI팀 확인된 사항). 백엔드는 이 상수를 DB에 기록하므로 `/health`와
-  `templates.model_version`에는 **v1.1.0**으로 남는다. 동작에는 영향이 없지만, 다음 릴리스에서
-  진짜 v1.1.1이 오면 구분이 안 되므로 그때 AI팀에 상수 갱신을 요청한다.
-- **자유 제스처는 아직 미검증**: 체크포인트는 여전히 G1~G5로 학습됐다. 구조적으로는 제스처를
-  임베딩으로 보므로 개인 제스처가 가능하지만, AI팀이 "unseen free-gesture generalization is not
-  yet validated"라고 명시했다.
+- **manifest에 파일별 sha256이 없다.** 이 릴리스는 ZIP 전체 해시(머리말)로만 확인할 수 있다.
+  `verify_ai_release.py`가 WARN으로 알린다. 다음 릴리스에는 AI팀에 파일 해시를 요청한다.
+- **버전 문자열이 이전보다 낮아 보인다**: 이전 `shared-dual-head-v1.1.0` → 지금 `...-g1g24-v1.0.0`.
+  이름 체계가 바뀐 것이고 DB는 문자열로만 비교하므로 동작에는 영향이 없다.
+- **자유 제스처는 아직 미검증**: 체크포인트는 G1~G24로 학습됐다. 구조적으로는 제스처를
+  임베딩으로 보므로 개인 제스처가 가능하지만, AI팀이 "Unseen-user plus arbitrary
+  unseen-personal-gesture live performance is not yet directly validated"라고 명시했다.
 - **Challenge는 앱이 판정한다**: 서버는 임계값만 내려주고 결과를 검증하지 않는다.
   앱을 조작하면 동작 없이 통과시킬 수 있다. 시연 범위의 결정이다 (6.5장).
 - **Challenge의 검출 신뢰도 관문이 꺼져 있다**: 플러그인이 신뢰도를 주지 않아
   `minDetectionScore`가 앱에서 적용되지 않는다(앱이 넣는 0.6은 측정값이 아닌 하한값이다).
   `TRACKING_UNSTABLE`이 발생하지 않는다.
 - **Challenge `maxLostFrames`는 임시값**: 38은 측정으로 도출한 값이 아니다.
-- **모델을 바꾸면 등록이 무효다**: v1.0.0 → v1.1.1처럼 벡터 공간이 달라지면 재색인으로 해결되지 않는다
-  (재색인은 같은 모델의 임베딩 재생성이다). `scripts/clear_enrollments.py` 후 전원 재등록.
+- **모델을 바꾸면 기존 템플릿이 무효다**: 벡터 공간이 다르다. 저장된 랜드마크 원본을 새 모듈 입력
+  형태로 변환할 수 있으면 `POST /admin/reindex`로 새 템플릿을 만든다(v1.1.1 → 지금 버전이 이 경우).
+  원본으로 재현할 수 없는 변화(촬영 길이·카메라 조건 등)라면 `scripts/clear_enrollments.py` 후 전원 재등록.
 - **등록 정책**: 릴리스 기준 "개인 제스처 1개 × 3회"다 (`enrollmentGestures=1`, `enrollmentTakes=3`).
 - **촬영 길이를 바꾸면 기존 등록이 무효가 된다.** `captureDurationMs`는 화면 설정이 아니라
   **AI 모델의 입력 feature**다(학습 분포: 평균 3.29초, 표준편차 1.15초). 등록과 인증의 길이가
   다르면 같은 사람·같은 동작도 유사도가 크게 떨어진다. 합성 입력 실측에서 2초로 등록한
-  템플릿에 5초 인증을 하면 **0.51**로, 활성 threshold 0.6275 아래였다(무관한 동작이 0.43).
+  템플릿에 5초 인증을 하면 **0.51**로, 당시 활성 threshold 0.6275 아래였다(무관한 동작이 0.43).
+  지금 모델에서도 실제 캡처의 duration만 4초→2초로 바꾸면 user 코사인이 **0.73**이다(Tu 0.824).
   에러 없이 인증만 실패하므로 원인을 찾기 어렵다. 값을 바꾸면 `PATCH /admin/config`가 경고를
   로그에 남기고, **`scripts/clear_enrollments.py`로 정리한 뒤 전원 재등록해야 한다.**
   (인코더 교체는 다르다. 그건 원본이 남아 있으므로 `POST /admin/reindex`로 재생성한다.)
-- **오른손 전용**: 프레임에 왼손 `handedness`가 있으면 AI 모듈이 거절한다(422 `wrong_hand`).
-  handedness를 보내지 않으면 검사되지 않으므로 앱이 화면에서 강제해야 한다.
+- **왼손**: 지금 모듈은 `handedness`가 Left면 오른손으로 미러링해 받는다(거절하지 않는다,
+  `wrong_hand` 사유 코드는 없어졌다). 앱은 handedness를 보내지 않으므로 미러링되지 않는다.
+  화면의 오른손 안내를 유지한다.
 - **테스트 데이터는 합성 좌표**: 테스트의 유사도 값(같은 입력 1.0 등)은 배선 확인용이며 실제 인식 성능이 아니다.
 - **인증 없음**: `/admin/*`, `DELETE /users`에 접근 제어가 없다. 외부에 노출하지 말 것.
 - **인코더 교체 중 인증 중단**: 프로세스에 인코더가 하나라서, 새 인코더를 올린 뒤 재색인이 끝날 때까지 `/verify`는 503이다.
@@ -755,8 +780,9 @@ backend/
 │       ├── reindex_service.py   # 재색인
 │       ├── threshold_service.py
 │       └── app_config_service.py
-├── ai/                          # AI팀 릴리스 shared-dual-head-v1.1.1
-├── ai_v1.0.0_baseline/          # 이전 릴리스 보관 (import되지 않음)
+├── ai/                          # AI팀 릴리스 witeck-mobile-shared-dual-head-g1g24-v1.0.0
+├── ai_v1.1.1_baseline/          # 이전 릴리스 보관 (import되지 않음)
+├── ai_v1.0.0_baseline/          # 그 이전 릴리스 보관 (import되지 않음)
 ├── alembic/                     # 마이그레이션
 ├── examples/                    # 앱팀 전달용 완전한 요청 예시
 ├── scripts/
